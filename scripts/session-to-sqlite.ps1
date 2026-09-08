@@ -13,7 +13,7 @@ param(
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
 
-$pythonExe = "C:\Python313\python.exe"
+$pythonExe = "python"
 if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

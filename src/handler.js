@@ -14,9 +14,11 @@ const PIPELINE_SCRIPT = path.join(
     os.homedir(), '.openclaw', 'hooks', 'compaction-pipeline', 'pipeline.ps1'
 );
 
-const LOG_FILE = path.join(
-    os.homedir(), '.openclaw', 'logs', 'compaction-pipeline.log'
-);
+// T06 安全修复：日志使用 LOCALAPPDATA 而非暴露 home 目录结构
+const LOG_DIR = process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, '.openclaw', 'logs')
+    : path.join(os.homedir(), '.openclaw', 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'compaction-pipeline.log');
 
 function log(msg) {
     const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);

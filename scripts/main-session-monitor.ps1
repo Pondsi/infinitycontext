@@ -46,10 +46,10 @@ $WakeIdleMin = 4               # v5.5：会话尾部无新写入超过此分钟�
 $StickyLimit = 5              # 连续失败 5 次 → 暂停该会话自动重试 30 分钟
 $StickyPauseMin = 30          # sticky 暂停时长（分钟）
 $EmergencyPct = 100.0         # 超过窗口 100% = 紧急态：不暂停，每轮必试压缩
-$BackupDir = "$env:USERPROFILE\.openclaw\backups\sessions"   # 压缩前 transcript 备份
+$BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\sessions"   # 压缩前 transcript 备份
 $LockFile = "$env:USERPROFILE\.openclaw\main-session-monitor.lock"
-$LogFile = "$env:USERPROFILE\.openclaw\logs\main-session-monitor.log"
-$StateFile = "$env:USERPROFILE\.openclaw\main-session-monitor-state.json"
+$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\main-session-monitor.log"
+$StateFile = "$env:LOCALAPPDATA\.openclaw\main-session-monitor-state.json"
 $CompactStateFile = "$env:USERPROFILE\.openclaw\compaction-active.json"   # v5.7: 压缩进行中标记（通知脚本据此跳过警告）
 
 # ---------- 文件锁 ----------
@@ -111,7 +111,7 @@ function Invoke-Compact {
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     # v6.8（09-08 修复）：统一由 hook 管线（pipeline.ps1）负责备份+SQLite，Invoke-Compact 不再重复
     # 调用 pipeline.ps1 -Phase before 做备份，如果 hook 后续触发会检测到近期备份并跳过
-    $pipelineScript = "$env:USERPROFILE\.openclaw\hooks\compaction-pipeline\pipeline.ps1"
+    $pipelineScript = Join-Path $PSScriptRoot "pipeline.ps1"
     if (Test-Path $pipelineScript) {
         try {
             Start-Process -FilePath 'powershell.exe' -ArgumentList @(
@@ -399,7 +399,7 @@ try {
                         #   没有 = 网关在生成过程中崩溃，jsonl 被截断
                         $crashDetected = $false
                         try {
-                            $crashProbe = & "C:\Python313\python.exe" -c "
+                            $crashProbe = & "python" -c "
 import json, sys
 p = sys.argv[1]
 with open(p, encoding='utf-8') as f:
@@ -434,7 +434,7 @@ print('NO_ASSISTANT')
 
                         # ★v5.5 原有逻辑：toolResult 后无文本回复
                         if (-not $wakeOk) {
-                            $tailProbe = & "C:\Python313\python.exe" -c "
+                            $tailProbe = & "python" -c "
 import json,sys
 p = sys.argv[1]
 with open(p, encoding='utf-8') as f:
@@ -593,7 +593,7 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                     }
                     if (Test-Path $sqlitePath) {
                         # 使用 Python 查询 SQLite，获取消息 ID 范围
-                        $pythonExe = "C:\Python313\python.exe"
+                        $pythonExe = "python"
                         if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
                         
                         # T09 安全修复：使用临时 .py 文件 + 命令行参数，避免字符串插值注入
@@ -624,7 +624,7 @@ print(json.dumps(result, ensure_ascii=False))
                             # L2 SQLite + FTS5 = 全量细节仓库（通过 Tool 按需检索）
                             
                             # 读取现有的 memory 文件（如果存在）
-                            $memoryDir = "$env:USERPROFILE\.openclaw\workspace\memory"
+                            $memoryDir = "$env:LOCALAPPDATA\.openclaw\memory"
                             if (-not (Test-Path $memoryDir)) { New-Item -ItemType Directory -Path $memoryDir -Force | Out-Null }
                             $memoryFile = Join-Path $memoryDir "session-$safeKey.md"
                             
@@ -864,7 +864,7 @@ print(json.dumps(result, ensure_ascii=False))
                             if (-not $wakeOk) {
                                 Write-Log "WAKE_FAILED_ALL: $key（3 次唤醒均未恢复，发送警告音）"
                                 try {
-                                    $notifyArgs = @('//nologo', $env:USERPROFILE + '\.openclaw\workspace\scripts\RunHidden.vbs', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$env:USERPROFILE\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "压缩后唤醒失败: $key")
+                                    $notifyArgs = @('//nologo', $env:LOCALAPPDATA\.openclaw\scripts\RunHidden.vbs, 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "压缩后唤醒失败: $key")
                                     Start-Process -FilePath 'wscript.exe' -ArgumentList $notifyArgs -WindowStyle Hidden -ErrorAction SilentlyContinue
                                 } catch {}
                             }
@@ -897,7 +897,7 @@ print(json.dumps(result, ensure_ascii=False))
                             if (-not $wakeOk2) {
                                 Write-Log "WAKE_FAILED_ALL: $key（轮换后 3 次唤醒均未恢复，发送警告音）"
                                 try {
-                                    $notifyArgs2 = @('//nologo', $env:USERPROFILE + '\.openclaw\workspace\scripts\RunHidden.vbs', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$env:USERPROFILE\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "轮换后唤醒失败: $key")
+                                    $notifyArgs2 = @('//nologo', $env:LOCALAPPDATA\.openclaw\scripts\RunHidden.vbs, 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "轮换后唤醒失败: $key")
                                     Start-Process -FilePath 'wscript.exe' -ArgumentList $notifyArgs2 -WindowStyle Hidden -ErrorAction SilentlyContinue
                                 } catch {}
                             }

@@ -10,10 +10,10 @@ param(
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
 
-$ScriptDir = "$env:USERPROFILE\.openclaw\scripts"
-$BackupDir = "$env:USERPROFILE\.openclaw\workspace-cloud\.openclaw\trajectory-exports"
+$ScriptDir = $PSScriptRoot
+$BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\trajectory-exports"
 $SqliteDir = "$env:USERPROFILE\.openclaw\sqlite-data"
-$LogFile = "$env:USERPROFILE\.openclaw\logs\compaction-pipeline.log"
+$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\compaction-pipeline.log"
 
 function Write-Log($msg) {
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -115,7 +115,7 @@ conn.close()
 print(json.dumps({'status':'ok', 'chunks': count, 'db': db_path}))
 "@ | Out-File -FilePath $pyFile -Encoding UTF8 -Force
 
-        $result = & "C:\Python313\python.exe" $pyFile $dbs.FullName $key 2>&1 | Out-String
+        $result = & "python" $pyFile $dbs.FullName $key 2>&1 | Out-String
         Remove-Item $pyFile -Force -ErrorAction SilentlyContinue
         Write-Log "HOOK_AFTER: SUMMARY: $key -> $($result.Trim())"
     } catch {
