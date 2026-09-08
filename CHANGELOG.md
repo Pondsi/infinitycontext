@@ -3,6 +3,30 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.5 — 2026-09-09
+
+Removes the last capability claims that did not match the published package.
+
+### Fixed
+- **The permissions section describes only the portable core.** The old table declared a
+  "Shell / process" capability for launching an external CLI and PowerShell helpers, and
+  the paragraphs below it described an optional hook that runs `pipeline.ps1`. Neither is in
+  the published artifact. The section now lists file read, file write and environment
+  variables only, and states plainly: **not declared because not used — network, MCP, shell,
+  subprocesses**.
+- **Every localised section now says the same thing.** The seven non-English sections of
+  `README.md` and all eight summaries in `references/languages.md` previously described a
+  layered pipeline, automatic backup/export, an integrity check against `pipeline.ps1` and a
+  hook layer. They were rewritten as compact summaries of the portable core: what it is,
+  where to install it, bounded retention, owner-only storage, confirmed deletion, licence.
+- **`SKILL.md` no longer names a hook or a pipeline.** The OpenClaw quick start, the host
+  table and the supply-chain section now refer to "host-specific automation" without
+  implying it is part of, or launched by, this package.
+
+### Notes
+- The only remaining mentions of PowerShell are the explicit statements that the package
+  contains none.
+
 ## 1.8.4 — 2026-09-09
 
 Closes the two T09 findings from the ClawHub review of 1.8.3.

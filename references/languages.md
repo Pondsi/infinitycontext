@@ -1,187 +1,124 @@
 # InfinityContext — other languages
 
-`SKILL.md` carries the two canonical sections (English and 简体中文) so that it
-stays small enough for an agent to load on every turn. The remaining localised
-summaries live here and are read only when someone asks for that language.
-
-Each section describes the same three scripts, the same safety rules and the
-same host support as the English section.
+`SKILL.md` carries the two canonical sections (English and 简体中文) so that it stays
+small enough for an agent to load on every turn. The localised summaries below cover the
+same facts: the four Python scripts, the same safety rules and the same host support.
+There is no other code in the published package.
 
 ---
 
 # 無限上下文壓縮與記憶優化
 
-> 透過多層壓縮、自動備份和 FTS5 搜尋，讓任何模型持續對話而不中斷。
+> 壓縮上下文、把去識別化後的對話片段存到**本機** SQLite/FTS5，隨時精確檢索。
 
-## 概述
-
-小模型（128K 上下文）一次深度思考就可能耗盡視窗。InfinityContext 透過多層防護確保對話永不中斷：
-
-2. **管線層**：自動備份 → SQLite → 壓縮 → 喚醒
-3. **Hook 層**：`compaction-pipeline` hook 攔截所有壓縮路徑
-4. **記憶層**：MEMORY.md 精簡 + FTS5 按需檢索
-
-## 安裝
-
-詳見 `SKILL.md` 的英文安裝步驟（註冊表安裝優先；原始碼安裝需固定 tag 並校驗 `checksums.txt`）。
-
-## 許可證
-
-MIT 許可證 — 詳見 [LICENSE](../LICENSE)。
+- **這是什麼**：標準 `SKILL.md` 技能，支援 dsh、Claude Code、OpenClaw、Cursor、Dify、Ollama 與自訂 Agent。
+- **安裝**：`clawhub install infinitycontext --workdir ~/.agents --dir skills`；原始碼安裝需固定 tag 並校驗 `checksums.txt`（見 `SKILL.md` 的 Install）。
+- **只需 Python 3.9+**：純標準庫，**不聯網、無 shell、不啟動子程序**。
+- **保留期有界**：預設 30 天（`--retention-days 1..3650`）；不限時間需顯式 `--allow-unbounded-retention`；`INFINITY_CONTEXT_NO_ARCHIVE=1` 可完全關閉。
+- **僅本機可讀**：目錄 0700／檔案 0600（Windows 受保護 DACL），Fail-Closed。
+- **清理需二次確認**：`cleanup.py` 必須 `--apply --confirm-destructive`。
+- **授權**：MIT，附強制署名條款——**必須標註 Pondsi**。
 
 ---
 
 # 無限コンテキスト圧縮とメモリ最適化
 
-> 多層圧縮、自動バックアップ、FTS5検索で、あらゆるモデルを途切れなく会話させます。
+> コンテキストを圧縮し、秘匿化した会話断片を**ローカル** SQLite/FTS5 に保存して、いつでも正確に検索。
 
-## 概要
-
-小規模モデル（128K コンテキスト）は一度の深い思考でウィンドウを消費する可能性があります。InfinityContext は多層の保護で会話が途切れないことを保証します：
-
-1. **設定層**：`keepRecentTokens=15000` + ウォッチドッグしきい値35%
-2. **パイプライン層**：自動バックアップ → SQLite → 圧縮 → ウェイク
-3. **Hook 層**：`compaction-pipeline` hook がすべての圧縮パスを傍受
-4. **メモリ層**：MEMORY.md 精査 + FTS5 オンデマンド検索
-
-## インストール
-
-`SKILL.md` の英語インストール手順を参照してください（レジストリからのインストールを推奨。ソースからは固定タグ + `checksums.txt` 検証が必要）。
-
-## ライセンス
-
-MIT ライセンス — 詳細は [LICENSE](../LICENSE)。
+- **概要**：標準 `SKILL.md` スキル。dsh、Claude Code、OpenClaw、Cursor、Dify、Ollama、独自エージェントに対応。
+- **インストール**：`clawhub install infinitycontext --workdir ~/.agents --dir skills`。ソース導入は tag を固定して `checksums.txt` を検証（`SKILL.md` の Install を参照）。
+- **Python 3.9+ のみ**：標準ライブラリのみ、**ネットワークなし・shell なし・子プロセスなし**。
+- **保持期間は有界**：既定 30 日（`--retention-days 1..3650`）。無期限は `--allow-unbounded-retention` が必要。`INFINITY_CONTEXT_NO_ARCHIVE=1` で停止。
+- **所有者のみ読み取り可**：ディレクトリ 0700／ファイル 0600（Windows は保護 DACL）、Fail-Closed。
+- **削除は二重確認**：`cleanup.py` は `--apply --confirm-destructive` が必須。
+- **ライセンス**：MIT（強制署名条項）。**Pondsi のクレジット表記が必須**。
 
 ---
 
-# 무한 컨텍스트 압축 및 메모리 최적화
+# 무한 컨텍스트 압축과 메모리 최적화
 
-> 다층 압축, 자동 백업, FTS5 검색으로 모든 모델이 끊김 없이 대화할 수 있게 합니다.
+> 컨텍스트를 압축하고 비식별화된 대화 조각을 **로컬** SQLite/FTS5에 저장해 언제든 정확히 검색합니다.
 
-## 개요
-
-소규모 모델(128K 컨텍스트)은 한 번의 깊은 사고로 윈도우를 소진할 수 있습니다. InfinityContext는 다계층 보호로 대화가 끊기지 않도록 보장합니다:
-
-1. **설정 계층**: `keepRecentTokens=15000` + 워치독 임계값 35%
-2. **파이프라인 계층**: 자동 백업 → SQLite → 압축 → 웨이크
-3. **Hook 계층**: `compaction-pipeline` hook이 모든 압축 경로를 가로챔
-4. **메모리 계층**: MEMORY.md 정리 + FTS5 온디맨드 검색
-
-## 설치
-
-`SKILL.md`의 영어 설치 절차를 참조하세요(레지스트리 설치 권장, 소스 설치는 고정 태그 + `checksums.txt` 검증 필요).
-
-## 라이선스
-
-MIT 라이선스 — 자세한 내용은 [LICENSE](../LICENSE)를 참조하세요.
+- **개요**: 표준 `SKILL.md` 스킬. dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama, 사용자 정의 에이전트 지원.
+- **설치**: `clawhub install infinitycontext --workdir ~/.agents --dir skills`. 소스 설치는 tag 고정 후 `checksums.txt` 검증(`SKILL.md`의 Install 참조).
+- **Python 3.9+만 필요**: 표준 라이브러리만, **네트워크 없음·shell 없음·하위 프로세스 없음**.
+- **보존 기간은 유한**: 기본 30일(`--retention-days 1..3650`). 무제한은 `--allow-unbounded-retention` 필요. `INFINITY_CONTEXT_NO_ARCHIVE=1`로 중지.
+- **소유자만 읽기 가능**: 디렉터리 0700/파일 0600(Windows는 보호 DACL), Fail-Closed.
+- **삭제는 이중 확인**: `cleanup.py`는 `--apply --confirm-destructive`가 필요합니다.
+- **라이선스**: MIT(필수 저작자 표시 조항). **Pondsi를 반드시 명시**.
 
 ---
 
-# Compresión de Contexto Ilimitada y Optimización de Memoria
+# Compresión de contexto y memoria optimizada
 
-> Mantenga cualquier modelo en funcionamiento indefinidamente con compresión multicapa, backup automático y búsqueda FTS5.
+> Comprime el contexto, guarda fragmentos anonimizados en un almacén **local** SQLite/FTS5 y recupera detalles exactos cuando los necesites.
 
-## Descripción
-
-Los modelos pequeños (128K de contexto) pueden agotar su ventana en un solo turno de pensamiento profundo. InfinityContext proporciona varias capas de protección:
-
-2. **Capa de Pipeline**: Backup automático → SQLite → compresión → activación
-3. **Capa de Hook**: El hook `compaction-pipeline` intercepta todas las rutas de compresión
-4. **Capa de Memoria**: MEMORY.md optimizado + búsqueda FTS5 bajo demanda
-
-## Instalación
-
-Consulte los pasos de instalación en inglés de `SKILL.md` (se recomienda el registro; desde el código fuente se exige una etiqueta fija y verificar `checksums.txt`).
-
-## Licencia
-
-Licencia MIT — ver [LICENSE](../LICENSE).
+- **Qué es**: una skill `SKILL.md` estándar para dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama y agentes propios.
+- **Instalación**: `clawhub install infinitycontext --workdir ~/.agents --dir skills`; desde el código fuente, fija el tag y verifica `checksums.txt` (ver Install en `SKILL.md`).
+- **Solo Python 3.9+**: biblioteca estándar, **sin red, sin shell, sin subprocesos**.
+- **Retención acotada**: 30 días por defecto (`--retention-days 1..3650`); sin límite solo con `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` lo detiene.
+- **Solo el propietario lee**: directorio 0700 / archivos 0600 (DACL protegida en Windows), fail-closed.
+- **Borrado con doble confirmación**: `cleanup.py` exige `--apply --confirm-destructive`.
+- **Licencia**: MIT con atribución obligatoria: **Pondsi debe figurar siempre**.
 
 ---
 
-# Compressão de Contexto Ilimitada e Otimização de Memória
+# Compressão de contexto e memória otimizada
 
-> Mantenha qualquer modelo rodando indefinidamente com compressão multicamada, backup automático e busca FTS5.
+> Comprime o contexto, guarda trechos anonimizados em um armazenamento **local** SQLite/FTS5 e recupera detalhes exatos quando precisar.
 
-## Descrição
-
-Modelos pequenos (128K de contexto) podem esgotar sua janela em um único turno de pensamento profundo. Fornece várias camadas de proteção:
-
-2. **Camada de Pipeline**: Backup automático → SQLite → compressão → ativação
-3. **Camada de Hook**: O hook `compaction-pipeline` intercepta todos os caminhos de compressão
-4. **Camada de Memória**: MEMORY.md otimizado + busca FTS5 sob demanda
-
-## Instalação
-
-Consulte as etapas de instalação em inglês do `SKILL.md` (registro recomendado; a partir do código-fonte é obrigatório usar uma tag fixa e verificar `checksums.txt`).
-
-## Licença
-
-Licença MIT — ver [LICENSE](../LICENSE).
+- **O que é**: uma skill `SKILL.md` padrão para dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama e agentes próprios.
+- **Instalação**: `clawhub install infinitycontext --workdir ~/.agents --dir skills`; a partir do código-fonte, fixe a tag e verifique `checksums.txt` (ver Install em `SKILL.md`).
+- **Apenas Python 3.9+**: biblioteca padrão, **sem rede, sem shell, sem subprocessos**.
+- **Retenção limitada**: 30 dias por padrão (`--retention-days 1..3650`); sem limite apenas com `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` desliga.
+- **Somente o proprietário lê**: diretório 0700 / arquivos 0600 (DACL protegida no Windows), fail-closed.
+- **Exclusão com dupla confirmação**: `cleanup.py` exige `--apply --confirm-destructive`.
+- **Licença**: MIT com atribuição obrigatória: **Pondsi deve ser sempre creditado**.
 
 ---
 
-# Compression de Contexte Illimitée et Optimisation de la Mémoire
+# Compression de contexte et mémoire optimisée
 
-> Maintenez n'importe quel modèle en fonctionnement indéfiniment avec compression multicouche, sauvegarde automatique et recherche FTS5.
+> Compresse le contexte, archive des fragments anonymisés dans un stockage **local** SQLite/FTS5 et retrouve des détails exacts à la demande.
 
-## Description
-
-Les petits modèles (128K de contexte) peuvent épuiser leur fenêtre en un seul tour de réflexion profonde. Fournit plusieurs couches de protection :
-
-2. **Couche de Pipeline** : Sauvegarde automatique → SQLite → compression → réveil
-3. **Couche de Hook** : Le hook `compaction-pipeline` intercepte tous les chemins de compression
-4. **Couche de Mémoire** : MEMORY.md optimisé + recherche FTS5 à la demande
-
-## Installation
-
-Voir les étapes d'installation en anglais dans `SKILL.md` (registre recommandé ; depuis les sources, un tag fixe et la vérification de `checksums.txt` sont obligatoires).
-
-## Licence
-
-Licence MIT — voir [LICENSE](../LICENSE).
+- **Quoi** : une skill `SKILL.md` standard pour dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama et agents maison.
+- **Installation** : `clawhub install infinitycontext --workdir ~/.agents --dir skills` ; depuis les sources, figez le tag et vérifiez `checksums.txt` (voir Install dans `SKILL.md`).
+- **Python 3.9+ uniquement** : bibliothèque standard, **pas de réseau, pas de shell, pas de sous-processus**.
+- **Rétention bornée** : 30 jours par défaut (`--retention-days 1..3650`) ; illimitée seulement avec `--allow-unbounded-retention` ; `INFINITY_CONTEXT_NO_ARCHIVE=1` l'arrête.
+- **Lecture par le propriétaire seul** : répertoire 0700 / fichiers 0600 (DACL protégée sous Windows), fail-closed.
+- **Suppression à double confirmation** : `cleanup.py` exige `--apply --confirm-destructive`.
+- **Licence** : MIT avec attribution obligatoire : **Pondsi doit toujours être crédité**.
 
 ---
 
-# Unbegrenzte Kontextkompression und Speicheroptimierung
+# Kontextkompression und optimierter Speicher
 
-> Halten Sie jedes Modell mit mehrschichtiger Kompression, automatischem Backup und FTS5-Suche unbegrenzt am Laufen.
+> Komprimiert den Kontext, archiviert entidentifizierte Ausschnitte in einem **lokalen** SQLite/FTS5-Speicher und ruft exakte Details auf Anfrage ab.
 
-## Beschreibung
-
-Kleine Modelle (128K Kontext) können ihr Fenster in einer einzigen Tiefdenk-Runde erschöpfen. Bietet mehrere Schutzschichten:
-
-2. **Pipeline-Schicht**: Automatisches Backup → SQLite → Kompression → Aufwecken
-3. **Hook-Schicht**: Der `compaction-pipeline`-Hook fängt alle Kompressionswege ab
-4. **Speicherschicht**: MEMORY.md optimiert + FTS5-Abfrage bei Bedarf
-
-## Installation
-
-Siehe die englischen Installationsschritte in `SKILL.md` (Registry empfohlen; aus dem Quellcode sind ein fester Tag und die Prüfung von `checksums.txt` erforderlich).
-
-## Lizenz
-
-MIT-Lizenz — siehe [LICENSE](../LICENSE).
+- **Was**: eine Standard-`SKILL.md`-Skill für dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama und eigene Agenten.
+- **Installation**: `clawhub install infinitycontext --workdir ~/.agents --dir skills`; aus dem Quellcode Tag fixieren und `checksums.txt` prüfen (siehe Install in `SKILL.md`).
+- **Nur Python 3.9+**: Standardbibliothek, **kein Netzwerk, keine Shell, keine Subprozesse**.
+- **Begrenzte Aufbewahrung**: 30 Tage standardmäßig (`--retention-days 1..3650`); unbegrenzt nur mit `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` stoppt sie.
+- **Nur der Eigentümer liest**: Verzeichnis 0700 / Dateien 0600 (unter Windows geschützte DACL), fail-closed.
+- **Löschen nur mit doppelter Bestätigung**: `cleanup.py` verlangt `--apply --confirm-destructive`.
+- **Lizenz**: MIT mit verpflichtender Namensnennung: **Pondsi muss immer genannt werden**.
 
 ---
 
-# Безлимитное сжатие контекста и оптимизация памяти
+# Сжатие контекста и оптимизация памяти
 
-> Поддерживайте любую модель в работе бесконечно с многоуровневым сжатием, автоматическим резервным копированием и поиском FTS5.
+> Сжимает контекст, сохраняет обезличенные фрагменты в **локальном** SQLite/FTS5 и по запросу находит точные детали.
 
-## Описание
+- **Что это**: стандартный навык `SKILL.md` для dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama и собственных агентов.
+- **Установка**: `clawhub install infinitycontext --workdir ~/.agents --dir skills`; из исходников — зафиксируйте tag и проверьте `checksums.txt` (см. Install в `SKILL.md`).
+- **Только Python 3.9+**: стандартная библиотека, **без сети, без shell, без подпроцессов**.
+- **Ограниченное хранение**: по умолчанию 30 дней (`--retention-days 1..3650`); без ограничения — только с `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` останавливает архивирование.
+- **Чтение только владельцем**: каталог 0700 / файлы 0600 (в Windows защищённый DACL), fail-closed.
+- **Удаление с двойным подтверждением**: `cleanup.py` требует `--apply --confirm-destructive`.
+- **Лицензия**: MIT с обязательным указанием авторства: **Pondsi указывается всегда**.
 
-Маленькие модели (128K контекста) могут исчерпать своё окно за один ход глубокого мышления. Предоставляет несколько уровней защиты:
+---
 
-1. **Уровень конфигурации**: `keepRecentTokens=15000` + порог сторожевого таймера 35%
-2. **Уровень конвейера**: Автоматическое резервное копирование → SQLite → сжатие → пробуждение
-3. **Уровень хука**: Хук `compaction-pipeline` перехватывает все пути сжатия
-4. **Уровень памяти**: Оптимизированный MEMORY.md + поиск FTS5 по запросу
-
-## Установка
-
-См. английские шаги установки в `SKILL.md` (рекомендуется реестр; из исходников обязательны фиксированный тег и проверка `checksums.txt`).
-
-## Лицензия
-
-Лицензия MIT — см. [LICENSE](../LICENSE).
+See `SKILL.md` for the authoritative English and Simplified Chinese documentation,
+`references/architecture.md` for the data model and the exact file layout, and
+`CHANGELOG.md` for the release history.

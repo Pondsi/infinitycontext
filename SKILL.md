@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.8.4"
+  version: "1.8.5"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -59,8 +59,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.4
-grep -q '^version: "1.8.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.5
+grep -q '^version: "1.8.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 ```
@@ -102,17 +102,16 @@ python3 scripts/cleanup.py --dry-run
 
 ## Quick start on OpenClaw
 
-The three scripts above are then available unchanged; OpenClaw discovers the skill
-from its skills directory and calls them through its shell tool. The Windows compaction automation (hook + pipeline) is a
-separate, optional integration that lives outside this package — see
-`openclaw/README.md` in the repository.
+The scripts above are then available unchanged; OpenClaw discovers the skill from its
+skills directory and calls them through its shell tool. Host-specific automation is
+optional and lives outside this package (see the repository).
 
 ## Host compatibility
 
 | Host | Install location | Notes |
 |------|------------------|-------|
 | **DeepSeek Harness (dsh)** | `~/.agents/skills/infinity-context/` or `<project>/.agents/skills/infinity-context/` | First-class; same contract as Claude Code |
-| **OpenClaw** | `<workspace>/skills/` (highest precedence) or `~/.openclaw/skills/` (managed) | First-class; optional hook documented in the repository |
+| **OpenClaw** | `<workspace>/skills/` (highest precedence) or `~/.openclaw/skills/` (managed) | First-class; discovered automatically |
 | **Claude Code** | `~/.claude/skills/infinity-context/` | `allowed-tools` pre-approves the declared capabilities |
 | **Cursor / Dify / Ollama / custom** | point the agent at this folder | Pure Python standard library |
 
@@ -167,10 +166,9 @@ only), `references/`, `sponsors/`. It contains no JavaScript, no PowerShell and
 no code fetched at install time — the audited artifact is exactly what runs.
 `checksums.txt` lists the SHA-256 of every published file except itself.
 
-Host-specific automation (for example an OpenClaw compaction hook) is
-deliberately **out of scope** for this package. Anything of that kind lives in
-the repository outside the published artifact and carries its own documentation,
-pinned revision and checksums.
+Any host-specific automation is deliberately **out of scope** for this package.
+Anything of that kind lives in the repository outside the published artifact and
+carries its own documentation, pinned revision and checksums.
 
 ## Configuration
 
@@ -252,9 +250,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw �
 
 ## 在 OpenClaw 上快速开始
 
-`clawhub install infinitycontext` 后，上述三个脚本即可直接调用；OpenClaw 从技能目录
-发现本技能并通过 shell 工具执行。Windows 压缩自动化（hook + pipeline）属于**可选集成**，
-不在本包内，详见仓库 `openclaw/README.md`。
+`clawhub install infinitycontext` 后，上述脚本即可直接调用；OpenClaw 从技能目录发现本技能
+并通过 shell 工具执行。宿主专有的自动化属于**可选集成**，不在本包内（见仓库）。
 
 ## 四个脚本
 
@@ -285,8 +282,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw �
 **不含任何 JavaScript / PowerShell，也不在安装时拉取外部代码**——被审计的产物就是
 实际运行的东西。`checksums.txt` 列出除自身外每个发布文件的 SHA-256。
 
-宿主专有的自动化（例如 OpenClaw 压缩钩子）**不属于本包范围**，只存在于仓库中、
-位于发布产物之外，并自带文档、固定版本号与校验和。
+宿主专有的自动化**不属于本包范围**，只存在于仓库中、位于发布产物之外，
+并自带文档、固定版本号与校验和。
 
 ## 其它语言
 

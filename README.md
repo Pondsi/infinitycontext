@@ -38,20 +38,24 @@
 
 ## Permissions / 权限声明
 
-Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
+Declared capability scope (mirrors the Agent Skills `allowed-tools` field). This is the whole
+surface of the published package:
 
 | Capability | Used for |
 |-----------|----------|
-| Shell / process | Launching the `openclaw` CLI and PowerShell helpers (argument arrays only — no shell string interpolation) |
-| File read | Reading session trajectory JSONL and local config files |
-| File write | Writing the SQLite archive, logs, and redacted trajectory backups under `%LOCALAPPDATA%` / `%USERPROFILE%` |
-| Environment | Reading `LOCALAPPDATA`, `USERPROFILE`, and `INFINITY_CONTEXT_AGENTS` |
+| File read | Reading the session transcript (JSONL) you pass in, and the archive it created |
+| File write | Writing the SQLite archive, its WAL sidecars, the archive marker, and — with `--redact-file` — rewriting one file inside a declared `--allow-dir` |
+| Environment | Reading `INFINITY_CONTEXT_HOME`, `INFINITY_CONTEXT_REDACT_RULES` and `INFINITY_CONTEXT_NO_ARCHIVE` |
 
-**Not declared because not used: network, MCP.** No data leaves the machine.
+**Not declared because not used: network, MCP, shell, subprocesses.** The core never starts
+another program, and nothing leaves the machine.
 
-> **Registry package note**: ClawHub and similar registries reject packages that contain self-executing JavaScript, so this package ships **no `.js` files**. The optional OpenClaw compaction hook (`openclaw/handler.js`, `openclaw/HOOK.md`, `openclaw/integrity.json`) is distributed in the **GitHub repository only**. Everything in this package runs as scripts that the agent invokes through its declared tools.
-
-When you install that hook from the GitHub repository, it launches exactly one subprocess: `pipeline.ps1`, resolved from the hook's own directory (never from `PATH`), verified against `integrity.json` (SHA-256) before execution, and run through the absolute `System32` path of `powershell.exe` with an argument array. No shell, no string interpolation, no `-Command`.
+> **Package boundary.** The published artifact is exactly the files listed in `checksums.txt`
+> (`SKILL.md`, `README.md`, `说明.md`, `CHANGELOG.md`, `SPONSORS.md`, `LICENSE`,
+> `checksums.txt`, `scripts/*.py`, `references/*.md`, `sponsors/*`) — **no JavaScript and no
+> PowerShell**. Any optional OpenClaw/Windows integration lives in the GitHub repository under
+> `openclaw/`, is **not** part of this package, and carries its own documentation and
+> `openclaw/checksums.txt`.
 
 ## English
 
@@ -118,8 +122,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.4
-grep -q '^version: "1.8.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.5
+grep -q '^version: "1.8.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 ```
 
@@ -237,8 +241,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.4
-grep -q '^version: "1.8.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.5
+grep -q '^version: "1.8.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 ```
 
@@ -298,34 +302,26 @@ Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ### 這是什麼？
 
-InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）對話中上下文溢出的問題。透過多層壓縮機制，讓任何大小的模型都能持續對話而不中斷。
+InfinityContext 是可移植的 AI Agent Skill（標準 `SKILL.md`）：壓縮上下文、把**去識別化**後的對話片段寫入**本機** SQLite/FTS5 封存，並可精確檢索早期細節。支援 dsh、Claude Code、OpenClaw、Cursor、Dify、Ollama 與自訂 Agent。
 
-### 功能特性
+### 安裝與使用
 
-- **宿主無關**：可搭配宿主提供的任何壓縮流程（手動或自動）
-- **自動備份**：每次壓縮前導出完整軌跡
-- **SQLite + FTS5 搜尋**：壓縮後的會話可透過三元組索引搜尋
-- **去重機制**：5 分鐘視窗避免重複備份
-- **全覆蓋壓縮路徑**：手動、自動壓縮、看門狗全部覆蓋
+```bash
+clawhub install infinitycontext --workdir ~/.agents --dir skills
+```
 
-### 快速開始
+完整步驟見 [English](#english) 與 [简体中文](#简体中文)。
 
-> **安裝 / Install**: `clawhub install infinitycontext` — full steps in [Quick Start](#quick-start) above. The archive keeps a bounded 30-day window by default.
+### 重點
 
-### 安全性與隱私
+- **只需 Python 3.9+**：純標準庫，**不聯網、無 shell、不啟動子程序**。
+- **保留期有界**：預設 30 天（`--retention-days 1..3650`）；不限時間需顯式 `--allow-unbounded-retention`；`INFINITY_CONTEXT_NO_ARCHIVE=1` 可完全關閉封存。
+- **僅本機可讀**：封存目錄 0700／檔案 0600（Windows 為受保護 DACL），Fail-Closed。
+- **清理需二次確認**：`cleanup.py` 必須 `--apply --confirm-destructive`，且只清理帶標記的目錄。
 
-- **純本機**：無網路請求、無遙測、無雲端同步，資料只留在本機。
-- **壓縮前先匯出**：每次壓縮前匯出完整會話軌跡，並把去識別化後的對話片段寫入本機 SQLite/FTS5 封存（可全文檢索）。
-- **去識別化 + 資料最小化**：正則規則遮蔽 API Key / Token / 密碼 / JWT / 私鑰 / 連線字串 / 手機號 / 電子郵件，高熵內容不進索引；過長內容依 `MAX_ARCHIVE_LENGTH` 掐頭去尾。
-- **Fail-Closed**：去識別化無法執行時直接銷毀備份，絕不保留明文。
-- **權限與保留**：備份目錄 ACL 收緊為「目前使用者 + SYSTEM」，預設保留 30 天後自動清理。
-- **清理需二次確認**：`cleanup.py` 只清理帶 `.infinity-context-archive` 標記的目錄，必須同時給出 `--apply --confirm-destructive`；一般 `.json`/`.tmp`/`.bak` 檔案永不刪除。
-- **完整性校驗**：壓縮鉤子執行前以 `integrity.json` 校驗 `pipeline.ps1`。
+### 授權
 
-### 許可證
-
-MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
-Pondsi 的署名**。详见 [LICENSE](LICENSE)。
+MIT（附**強制署名條款**）：可自由使用（含修改後的變體），但**必須標註 Pondsi 的署名**。
 
 ---
 
@@ -333,75 +329,53 @@ Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ### これは何？
 
-InfinityContext は、小規模モデル（128K コンテキスト）のコンテキストオーバーフローを防止する AI Agent Skill です。多層圧縮、自動バックアップ、FTS5 検索で会話を途切れなく維持します。
+InfinityContext は移植可能な AI エージェントスキル（標準 `SKILL.md`）です。コンテキストを圧縮し、**秘匿化済み**の会話断片を**ローカル** SQLite/FTS5 アーカイブへ保存し、過去の詳細を正確に検索できます。dsh、Claude Code、OpenClaw、Cursor、Dify、Ollama、独自エージェントに対応。
 
-### 機能
-
-- **多層保護**：設定 → パイプライン → Hook → メモリ
-- **自動バックアップ**：圧縮前に完全な軌跡をエクスポート
-- **SQLite + FTS5 検索**：圧縮セッションをトライグラムインデックスで検索
-- **重複排除**：5分ウィンドウで重複バックアップを防止
-
-### クイックスタート
+### インストールと使い方
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### セキュリティとプライバシー
+完全な手順は [English](#english) と [简体中文](#简体中文) を参照してください。
 
-- **完全ローカル**：ネットワーク通信・テレメトリ・クラウド同期は一切なし。データは端末内にのみ保存されます。
-- **圧縮前に完全エクスポート**：圧縮のたびにセッション軌跡全体をエクスポートし、秘匿化した会話断片をローカルの SQLite/FTS5 アーカイブ（全文検索可能）に書き込みます。
-- **秘匿化とデータ最小化**：正規表現で API キー / トークン / パスワード / JWT / 秘密鍵 / 接続文字列 / 電話番号 / メールをマスクし、高エントロピー値は索引から除外。長すぎる内容は `MAX_ARCHIVE_LENGTH` で頭と末尾のみ保持します。
-- **Fail-Closed**：秘匿化を実行できない場合はバックアップを破棄し、平文を残しません。
-- **権限と保持期間**：バックアップの ACL は「現在のユーザー + SYSTEM」に限定。既定で 30 日後に自動削除されます。
-- **削除には二段階の確認が必要**：`cleanup.py` は `.infinity-context-archive` マーカーのあるディレクトリだけを対象とし、`--apply --confirm-destructive` の同時指定を必須とします。汎用の `.json`/`.tmp`/`.bak` は決して削除しません。
-- **完全性検証**：圧縮フックは実行前に `integrity.json` で `pipeline.ps1` を検証します。
+### 要点
+
+- **Python 3.9+ のみ**：標準ライブラリのみ、**ネットワークなし・shell なし・子プロセスなし**。
+- **保持期間は有界**：既定 30 日（`--retention-days 1..3650`）。無期限は明示的な `--allow-unbounded-retention` が必要。`INFINITY_CONTEXT_NO_ARCHIVE=1` でアーカイブを完全に停止。
+- **所有者のみ読み取り可**：ディレクトリ 0700／ファイル 0600（Windows は保護 DACL）、Fail-Closed。
+- **削除は二重確認**：`cleanup.py` は `--apply --confirm-destructive` が必須で、マーカーのあるディレクトリだけを対象にします。
 
 ### ライセンス
 
-MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
-Pondsi 的署名**。详见 [LICENSE](LICENSE)。
+MIT（**強制署名条項**付き）：全体または一部（改変版を含む）の利用は自由ですが、**Pondsi のクレジット表記が必須**です。
 
 ---
 
 ## 한국어
 
-### 이것은 무엇인가?
+### 무엇인가요?
 
-InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플로우를 방지하는 AI Agent Skill입니다. 다층 압축, 자동 백업, FTS5 검색으로 대화를 끊김 없이 유지합니다.
+InfinityContext는 이식 가능한 AI 에이전트 스킬(표준 `SKILL.md`)입니다. 컨텍스트를 압축하고 **비식별화된** 대화 조각을 **로컬** SQLite/FTS5 아카이브에 저장하며, 과거의 세부 내용을 정확히 검색합니다. dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama 및 사용자 정의 에이전트를 지원합니다.
 
-### 기능
-
-- **다층 보호**: 설정 → 파이프라인 → Hook → 메모리
-- **자동 백업**: 압缩 전 완전한轨迹 내보내기
-- **SQLite + FTS5 검색**: 압축 세션을 트리그램 인덱스로 검색
-- **중복 제거**: 5분 윈도우로 중복 백업 방지
-
-### 빠른 시작
+### 설치와 사용
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### 보안 및 개인정보
+전체 절차는 [English](#english)와 [简体中文](#简体中文)를 참고하세요.
 
-- **완전 로컬**: 네트워크 요청·텔레메트리·클라우드 동기화가 없습니다. 데이터는 이 컴퓨터에만 남습니다.
-- **압축 전 전체 내보내기**: 압축할 때마다 세션 전체 기록을 내보내고, 마스킹된 대화 조각을 로컬 SQLite/FTS5 아카이브(전문 검색 가능)에 기록합니다.
-- **마스킹 및 데이터 최소화**: 정규식으로 API 키 / 토큰 / 비밀번호 / JWT / 개인 키 / 연결 문자열 / 전화번호 / 이메일을 가리고, 엔트로피가 높은 값은 색인에서 제외합니다. 지나치게 긴 내용은 `MAX_ARCHIVE_LENGTH`로 앞뒤만 보관합니다.
-- **Fail-Closed**: 마스킹을 실행할 수 없으면 백업을 파기하며 평문을 남기지 않습니다.
-- **권한 및 보존**: 백업 ACL은 "현재 사용자 + SYSTEM"으로 제한되며 기본 30일 후 자동 삭제됩니다.
-- **삭제에는 2단계 확인**: `cleanup.py`는 `.infinity-context-archive` 마커가 있는 디렉터리만 대상으로 하며 `--apply --confirm-destructive`를 함께 지정해야 합니다. 일반 `.json`/`.tmp`/`.bak` 파일은 절대 삭제하지 않습니다.
-- **무결성 검사**: 압축 훅은 실행 전에 `integrity.json`으로 `pipeline.ps1`을 검증합니다.
+### 핵심
+
+- **Python 3.9+만 필요**: 표준 라이브러리만 사용, **네트워크 없음·shell 없음·하위 프로세스 없음**.
+- **보존 기간은 유한**: 기본 30일(`--retention-days 1..3650`). 무제한은 명시적 `--allow-unbounded-retention`이 필요하며 `INFINITY_CONTEXT_NO_ARCHIVE=1`로 완전히 끌 수 있습니다.
+- **소유자만 읽기 가능**: 디렉터리 0700/파일 0600(Windows는 보호된 DACL), Fail-Closed.
+- **삭제는 이중 확인**: `cleanup.py`는 `--apply --confirm-destructive`가 필요하며 마커가 있는 디렉터리만 정리합니다.
 
 ### 라이선스
 
-MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
-Pondsi 的署名**。详见 [LICENSE](LICENSE)。
+MIT(**필수 저작자 표시 조항**): 전체 또는 일부(수정본 포함) 사용은 자유이지만 **Pondsi를 반드시 명시**해야 합니다.
 
 ---
 
@@ -409,75 +383,53 @@ Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ### ¿Qué es esto?
 
-InfinityContext es un Skill de OpenClaw que previene el desbordamiento de contexto en modelos pequeños (128K de contexto). Proporciona compresión multicapa, backup automático y búsqueda FTS5.
+InfinityContext es una skill de agente de IA portátil (un paquete `SKILL.md` estándar): comprime el contexto, archiva fragmentos de conversación **anonimizados** en un almacén **local** SQLite/FTS5 y recupera detalles exactos de turnos anteriores. Funciona en dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama y agentes propios.
 
-### Características
-
-- **Protección multicapa**: Configuración → Pipeline → Hook → Memoria
-- **Backup automático**: Trajectory exportado antes de cada compresión
-- **SQLite + Búsqueda FTS5**: Sesiones comprimidas buscables por índice trigram
-- **Deduplicación**: Ventana de 5 minutos previene backups duplicados
-
-### Inicio Rápido
+### Instalación y uso
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### Seguridad y privacidad
+Los pasos completos están en [English](#english) y [简体中文](#简体中文).
 
-- **Solo local**: sin peticiones de red, sin telemetría y sin sincronización en la nube. Los datos permanecen en este equipo.
-- **Exportación completa antes de comprimir**: cada compactación exporta toda la trayectoria de la sesión y escribe fragmentos de conversación redactados en un archivo SQLite/FTS5 local (con búsqueda de texto completo).
-- **Redacción y minimización**: expresiones regulares ocultan claves de API, tokens, contraseñas, JWT, claves privadas, cadenas de conexión, teléfonos y correos; los valores de alta entropía se excluyen del índice. El contenido demasiado largo se recorta con `MAX_ARCHIVE_LENGTH` (se conservan inicio y final).
-- **Fail-closed**: si la redacción no puede ejecutarse, la copia de seguridad se destruye; nunca se conserva en texto plano.
-- **Permisos y retención**: la ACL de las copias se limita al usuario actual + SYSTEM y se eliminan automáticamente a los 30 días por defecto.
-- **La limpieza exige doble confirmación**: `cleanup.py` solo actúa en directorios con el marcador `.infinity-context-archive` y requiere `--apply --confirm-destructive`; los archivos genéricos `.json`/`.tmp`/`.bak` nunca se borran.
-- **Verificación de integridad**: el hook de compactación verifica `pipeline.ps1` contra `integrity.json` antes de ejecutarlo.
+### Puntos clave
+
+- **Solo Python 3.9+**: biblioteca estándar, **sin red, sin shell, sin subprocesos**.
+- **Retención acotada**: 30 días por defecto (`--retention-days 1..3650`); sin límite solo con `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` detiene el archivado.
+- **Solo el propietario puede leer**: directorio 0700 / archivos 0600 (DACL protegida en Windows), fail-closed.
+- **Borrado con doble confirmación**: `cleanup.py` exige `--apply --confirm-destructive` y solo actúa sobre directorios con marcador.
 
 ### Licencia
 
-MIT License with a **mandatory attribution requirement** — any use, including
-modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
+MIT (con **cláusula de atribución obligatoria**): se permite usar todo o parte, incluso variantes modificadas, pero **Pondsi debe figurar siempre como autor**.
 
 ---
 
 ## Português
 
-### O que é isso?
+### O que é?
 
-InfinityContext é um Skill do OpenClaw que previne o transbordamento de contexto em modelos pequenos (128K de contexto). Fornece compressão multicamada, backup automático e busca FTS5.
+InfinityContext é uma skill de agente de IA portátil (um pacote `SKILL.md` padrão): comprime o contexto, arquiva trechos de conversa **anonimizados** em um armazenamento **local** SQLite/FTS5 e recupera detalhes exatos de turnos anteriores. Funciona em dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama e agentes próprios.
 
-### Características
-
-- **Proteção multicamada**: Configuração → Pipeline → Hook → Memória
-- **Backup automático**: Trajetória exportada antes de cada compressão
-- **SQLite + Busca FTS5**: Sessões comprimidas pesquisáveis por índice trigram
-- **Deduplicação**: Janela de 5 minutos previne backups duplicados
-
-### Início Rápido
+### Instalação e uso
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### Segurança e privacidade
+O passo a passo completo está em [English](#english) e [简体中文](#简体中文).
 
-- **Somente local**: sem requisições de rede, sem telemetria e sem sincronização na nuvem. Os dados permanecem neste computador.
-- **Exportação completa antes de comprimir**: cada compactação exporta toda a trajetória da sessão e grava trechos de conversa redigidos em um arquivo SQLite/FTS5 local (com busca em texto completo).
-- **Redação e minimização**: expressões regulares mascaram chaves de API, tokens, senhas, JWT, chaves privadas, strings de conexão, telefones e e-mails; valores de alta entropia ficam fora do índice. Conteúdo muito longo é recortado por `MAX_ARCHIVE_LENGTH` (mantendo início e fim).
-- **Fail-closed**: se a redação não puder ser executada, o backup é destruído; nunca é mantido em texto claro.
-- **Permissões e retenção**: a ACL dos backups é restrita ao usuário atual + SYSTEM e eles são removidos automaticamente após 30 dias por padrão.
-- **A limpeza exige dupla confirmação**: o `cleanup.py` só atua em diretórios com o marcador `.infinity-context-archive` e exige `--apply --confirm-destructive`; arquivos genéricos `.json`/`.tmp`/`.bak` nunca são apagados.
-- **Verificação de integridade**: o hook de compactação verifica `pipeline.ps1` contra `integrity.json` antes de executar.
+### Pontos-chave
+
+- **Apenas Python 3.9+**: biblioteca padrão, **sem rede, sem shell, sem subprocessos**.
+- **Retenção limitada**: 30 dias por padrão (`--retention-days 1..3650`); sem limite apenas com `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` desliga o arquivamento.
+- **Somente o proprietário lê**: diretório 0700 / arquivos 0600 (DACL protegida no Windows), fail-closed.
+- **Exclusão com dupla confirmação**: `cleanup.py` exige `--apply --confirm-destructive` e só age em diretórios com marcador.
 
 ### Licença
 
-MIT License with a **mandatory attribution requirement** — any use, including
-modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
+MIT (com **cláusula de atribuição obrigatória**): é permitido usar tudo ou parte, inclusive variantes modificadas, mas **Pondsi deve ser sempre creditado**.
 
 ---
 
@@ -485,37 +437,26 @@ modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ### Qu'est-ce que c'est ?
 
-InfinityContext est un Skill OpenClaw qui empêche le débordement de contexte dans les petits modèles (128K de contexte). Il fournit compression multicouche, sauvegarde automatique et recherche FTS5.
+InfinityContext est une skill d'agent IA portable (un paquet `SKILL.md` standard) : elle compresse le contexte, archive des fragments de conversation **anonymisés** dans un stockage **local** SQLite/FTS5 et retrouve des détails exacts de tours antérieurs. Compatible dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama et agents maison.
 
-### Fonctionnalités
-
-- **Protection multicouche** : Configuration → Pipeline → Hook → Mémoire
-- **Sauvegarde automatique** : Trajectoire exportée avant chaque compression
-- **SQLite + Recherche FTS5** : Sessions compressées recherchables par index trigram
-- **Dédoublonnage** : Fenêtre de 5 minutes empêche les sauvegardes en double
-
-### Démarrage Rapide
+### Installation et usage
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### Sécurité et confidentialité
+Les étapes complètes sont dans [English](#english) et [简体中文](#简体中文).
 
-- **100 % local** : aucune requête réseau, aucune télémétrie, aucune synchronisation cloud. Les données restent sur cette machine.
-- **Export complet avant compression** : chaque compaction exporte l'intégralité de la trajectoire de session et écrit des extraits de conversation masqués dans une archive SQLite/FTS5 locale (recherche plein texte).
-- **Masquage et minimisation** : des expressions régulières masquent clés d'API, jetons, mots de passe, JWT, clés privées, chaînes de connexion, téléphones et e-mails ; les valeurs à forte entropie sont exclues de l'index. Les contenus trop longs sont tronqués via `MAX_ARCHIVE_LENGTH` (début et fin conservés).
-- **Fail-closed** : si le masquage ne peut pas s'exécuter, la sauvegarde est détruite ; aucun texte en clair n'est conservé.
-- **Permissions et rétention** : l'ACL des sauvegardes est limitée à l'utilisateur courant + SYSTEM et elles sont supprimées automatiquement après 30 jours par défaut.
-- **Le nettoyage exige une double confirmation** : `cleanup.py` n'agit que sur les répertoires portant le marqueur `.infinity-context-archive` et exige `--apply --confirm-destructive` ; les fichiers génériques `.json`/`.tmp`/`.bak` ne sont jamais supprimés.
-- **Vérification d'intégrité** : le hook de compaction vérifie `pipeline.ps1` via `integrity.json` avant exécution.
+### Points clés
+
+- **Python 3.9+ uniquement** : bibliothèque standard, **pas de réseau, pas de shell, pas de sous-processus**.
+- **Rétention bornée** : 30 jours par défaut (`--retention-days 1..3650`) ; illimitée uniquement avec `--allow-unbounded-retention` ; `INFINITY_CONTEXT_NO_ARCHIVE=1` désactive l'archivage.
+- **Lecture par le propriétaire seul** : répertoire 0700 / fichiers 0600 (DACL protégée sous Windows), fail-closed.
+- **Suppression à double confirmation** : `cleanup.py` exige `--apply --confirm-destructive` et n'agit que sur un répertoire portant le marqueur.
 
 ### Licence
 
-MIT License with a **mandatory attribution requirement** — any use, including
-modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
+MIT (avec **clause d'attribution obligatoire**) : l'usage total ou partiel, variantes modifiées comprises, est autorisé, mais **Pondsi doit toujours être crédité**.
 
 ---
 
@@ -523,37 +464,26 @@ modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ### Was ist das?
 
-InfinityContext ist ein OpenClaw-Skill, der Kontext-Überlauf in kleinen Modellen (128K Kontext) verhindert. Bietet mehrschichtige Kompression, automatisches Backup und FTS5-Suche.
+InfinityContext ist eine portable KI-Agent-Skill (ein Standard-`SKILL.md`-Paket): Sie komprimiert den Kontext, archiviert **entidentifizierte** Gesprächsausschnitte in einem **lokalen** SQLite/FTS5-Speicher und ruft exakte Details früherer Turns ab. Läuft auf dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama und eigenen Agenten.
 
-### Funktionen
-
-- **Mehrschichtiger Schutz**: Konfiguration → Pipeline → Hook → Speicher
-- **Automatisches Backup**: Trajektorie wird vor jeder Kompression exportiert
-- **SQLite + FTS5-Suche**: Komprimierte Sessions über Trigramm-Index durchsuchbar
-- **Deduplizierung**: 5-Minuten-Fenster verhindert doppelte Backups
-
-### Schnellstart
+### Installation und Nutzung
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### Sicherheit und Datenschutz
+Die vollständigen Schritte stehen in [English](#english) und [简体中文](#简体中文).
 
-- **Nur lokal**: keine Netzwerkanfragen, keine Telemetrie, keine Cloud-Synchronisierung. Die Daten bleiben auf diesem Rechner.
-- **Vollständiger Export vor dem Komprimieren**: Jede Komprimierung exportiert den kompletten Sitzungsverlauf und schreibt redigierte Gesprächsausschnitte in ein lokales SQLite/FTS5-Archiv (Volltextsuche).
-- **Redaktion und Datenminimierung**: Reguläre Ausdrücke maskieren API-Schlüssel, Token, Passwörter, JWT, private Schlüssel, Verbindungszeichenfolgen, Telefonnummern und E-Mails; Werte mit hoher Entropie werden nicht indexiert. Zu lange Inhalte werden per `MAX_ARCHIVE_LENGTH` gekürzt (Anfang und Ende bleiben erhalten).
-- **Fail-Closed**: Kann die Redaktion nicht ausgeführt werden, wird das Backup vernichtet; Klartext wird nie behalten.
-- **Rechte und Aufbewahrung**: Die ACL der Backups ist auf aktuellen Benutzer + SYSTEM beschränkt; sie werden standardmäßig nach 30 Tagen gelöscht.
-- **Löschen erfordert doppelte Bestätigung**: `cleanup.py` arbeitet nur in Verzeichnissen mit der Markierung `.infinity-context-archive` und verlangt `--apply --confirm-destructive`; generische `.json`/`.tmp`/`.bak`-Dateien werden nie gelöscht.
-- **Integritätsprüfung**: Der Compaction-Hook prüft `pipeline.ps1` vor der Ausführung gegen `integrity.json`.
+### Kernpunkte
+
+- **Nur Python 3.9+**: Standardbibliothek, **kein Netzwerk, keine Shell, keine Subprozesse**.
+- **Begrenzte Aufbewahrung**: standardmäßig 30 Tage (`--retention-days 1..3650`); unbegrenzt nur mit `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` schaltet die Archivierung ab.
+- **Nur der Eigentümer liest**: Verzeichnis 0700 / Dateien 0600 (unter Windows geschützte DACL), fail-closed.
+- **Löschen nur mit doppelter Bestätigung**: `cleanup.py` verlangt `--apply --confirm-destructive` und arbeitet nur in einem Verzeichnis mit Marker.
 
 ### Lizenz
 
-MIT License with a **mandatory attribution requirement** — any use, including
-modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
+MIT (mit **verpflichtender Namensnennung**): Nutzung ganz oder teilweise, auch modifiziert, ist erlaubt — **Pondsi muss jedoch immer genannt werden**.
 
 ---
 
@@ -561,37 +491,28 @@ modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ### Что это?
 
-InfinityContext — это навык OpenClaw, предотвращающий переполнение контекста в маленьких моделях (128K контекста). Предоставляет многоуровневое сжатие, автоматическое резервирование и поиск FTS5.
+InfinityContext — переносимый навык ИИ-агента (стандартный пакет `SKILL.md`): сжимает контекст, сохраняет **обезличенные** фрагменты диалога в **локальное** хранилище SQLite/FTS5 и точно находит детали прошлых ходов. Работает в dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama и собственных агентах.
 
-### Возможности
-
-- **Многоуровневая защита**: Конфигурация → Конвейер → Хук → Память
-- **Автоматическое резервирование**: Траектория экспортируется перед каждым сжатием
-- **SQLite + Поиск FTS5**: Сжатые сессии searchable через trigram индекс
-- **Дедупликация**: 5-минутное окно предотвращает дублирование бэкапов
-
-### Быстрый старт
+### Установка и использование
 
 ```bash
-# Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
 
-### Безопасность и конфиденциальность
+Полные шаги — в разделах [English](#english) и [简体中文](#简体中文).
 
-- **Только локально**: никаких сетевых запросов, телеметрии и облачной синхронизации. Данные остаются на этом компьютере.
-- **Полный экспорт перед сжатием**: каждое сжатие экспортирует всю траекторию сессии и записывает отредактированные фрагменты диалога в локальный архив SQLite/FTS5 (полнотекстовый поиск).
-- **Редактирование и минимизация**: регулярные выражения маскируют API-ключи, токены, пароли, JWT, приватные ключи, строки подключения, телефоны и адреса электронной почты; значения с высокой энтропией не попадают в индекс. Слишком длинный текст обрезается через `MAX_ARCHIVE_LENGTH` (начало и конец сохраняются).
-- **Fail-Closed**: если редактирование невозможно, резервная копия уничтожается; открытый текст не сохраняется.
-- **Права и хранение**: ACL резервных копий ограничен текущим пользователем + SYSTEM; по умолчанию они удаляются через 30 дней.
-- **Удаление требует двойного подтверждения**: `cleanup.py` работает только в каталогах с маркером `.infinity-context-archive` и требует `--apply --confirm-destructive`; обычные файлы `.json`/`.tmp`/`.bak` не удаляются никогда.
-- **Проверка целостности**: хук сжатия проверяет `pipeline.ps1` по `integrity.json` перед выполнением.
+### Ключевое
+
+- **Только Python 3.9+**: стандартная библиотека, **без сети, без shell, без подпроцессов**.
+- **Ограниченное хранение**: по умолчанию 30 дней (`--retention-days 1..3650`); без ограничения — только с явным `--allow-unbounded-retention`; `INFINITY_CONTEXT_NO_ARCHIVE=1` полностью отключает архивирование.
+- **Чтение только владельцем**: каталог 0700 / файлы 0600 (в Windows — защищённый DACL), fail-closed.
+- **Удаление с двойным подтверждением**: `cleanup.py` требует `--apply --confirm-destructive` и работает только в каталоге с маркером.
 
 ### Лицензия
 
-MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
-Pondsi 的署名**。详见 [LICENSE](LICENSE)。
+MIT (с **обязательным указанием авторства**): использование целиком или частично, включая изменённые варианты, разрешено, но **Pondsi должен быть указан всегда**.
+
+---
 
 ## Security / 安全模型
 
