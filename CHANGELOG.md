@@ -3,6 +3,16 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.4 — 2026-09-09
+
+Signature refresh requested by the author.
+
+### Changed
+- The attribution line at the end of `README.md` and `说明.md` now credits
+  `deepseek-v4-flash/pro` without the stray separator and adds `Gemini3.8-flash`:
+  `Pondsi (+MiMo-v2.5/v2.5pro+deepseek-v4-flash/pro+deepseek-v4.1-flash-expires-on-0910+GLM5.3-flash+Gemini3.1-pro+Qwen3.8-27b+Gemini3.8-flash) — automatically committed by Openclaw`.
+- Source-install comments pin `v1.6.4` with the matching version guard.
+
 ## 1.6.3 — 2026-09-09
 
 Documentation-parity release. The ClawHub review of 1.6.2 accepted the install-pin and

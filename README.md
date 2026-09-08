@@ -57,8 +57,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 2. From source: pin the reviewed release tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.3
-grep -q '^version: "1.6.3"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.4
+grep -q '^version: "1.6.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 
 # 3. Copy exactly these files (never `cp -r`, never a wildcard)
@@ -129,8 +129,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 方式二：源码安装——固定已发布 tag（必须等于 SKILL.md 的 version），并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.3
-grep -q '^version: "1.6.3"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.4
+grep -q '^version: "1.6.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 
 # 逐文件显式复制（禁止 cp -r、禁止通配符）
@@ -505,4 +505,4 @@ This skill stores conversation context in a local-only SQLite database for retri
 
 ---
 
-Pondsi (+MiMo-v2.5/v2.5pro+deepseek-v4-flash/pro+/deepseek-v4.1-flash-expires-on-0910+GLM5.3-flash+Gemini3.1-pro+Qwen3.8-27b) — automatically committed by Openclaw
+Pondsi (+MiMo-v2.5/v2.5pro+deepseek-v4-flash/pro+deepseek-v4.1-flash-expires-on-0910+GLM5.3-flash+Gemini3.1-pro+Qwen3.8-27b+Gemini3.8-flash) — automatically committed by Openclaw
