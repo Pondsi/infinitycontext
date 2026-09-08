@@ -1,17 +1,37 @@
 ---
 name: infinity-context
-description: "Use when a long agent session is about to hit its context limit, when a detail from an earlier turn must be recalled exactly, or when past sessions should stay searchable offline. Compresses context, archives every conversation chunk into a local SQLite/FTS5 store with owner-only permissions, and retrieves exact details on demand. Works out of the box on DeepSeek Harness (dsh) and OpenClaw; also runs on Claude Code, Cursor, Dify, Ollama and any Agent Skills host."
+description: "Use when a long agent session is about to hit its context limit, when a detail from an earlier turn must be recalled exactly, or when past sessions should stay searchable offline. Compresses context, archives every conversation chunk into a local SQLite/FTS5 store with owner-only permissions, and retrieves exact details on demand. Ships two explicitly opt-in maintenance tools that change local files: a retention cleanup that permanently deletes expired archive files (verified archive marker + filename allowlist + --confirm-destructive), and an in-place redaction helper that rewrites a file only inside a declared --allow-dir. Works out of the box on DeepSeek Harness (dsh) and OpenClaw; also runs on Claude Code, Cursor, Dify, Ollama and any Agent Skills host."
 license: MIT
 compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh), OpenClaw, Claude Code, Cursor, Dify, Ollama, custom agents. Python 3.9+ standard library only. No network access, no shell commands, no subprocesses, no Windows-only dependency."
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.6.6"
+  version: "1.7.0"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
 
-# InfinityContext — portable context compression & memory archive
+# InfinityContext
+
+> ## ⚠️ Security & Privacy Disclosure (Intended Behavior)
+>
+> InfinityContext is a **local persistent store and lifecycle manager** for agent sessions.
+> By design it performs these local operations:
+>
+> | Operation | Tool | Scope control |
+> |-----------|------|---------------|
+> | Persist redacted conversation chunks in a local SQLite/FTS5 archive | `session_to_sqlite.py` | owner-only directory (`0700`/`0600` or a protected DACL), fail-closed |
+> | Permanently delete expired archive files | `cleanup.py` | verified archive marker + full-filename allowlist + non-recursive + `--apply --confirm-destructive` |
+> | Rewrite a file in place (redaction) | `session_to_sqlite.py --redact-file` | requires `--allow-dir`; symlink-resolved path must stay inside it |
+> | Move the archive when the path is not ASCII-safe | `session_to_sqlite.py` | **refused** unless `--allow-dir-fallback` is given |
+>
+> Nothing is sent anywhere: no network, no telemetry, no cloud sync. Redaction is best-effort;
+> the archive still holds a detailed record of your sessions, so keep it out of synced or
+> shared folders and run cleanup deliberately.
+>
+> **Installing this skill means accepting these local persistence and file-mutation
+> capabilities.**
+ — portable context compression & memory archive
 
 > Keep any model running indefinitely: compress context, archive every chunk locally, retrieve exact details later.
 
@@ -36,8 +56,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.6
-grep -q '^version: "1.6.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.7.0
+grep -q '^version: "1.7.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 
@@ -112,6 +132,14 @@ Compression itself is a prompt-level discipline: keep `keepRecentTokens` small
 enough that a deep reply still fits, and let the archive carry the details
 instead of the context window.
 
+## First-run consent (agent behaviour)
+
+Before archiving a session for the first time in a given environment, the agent **must**
+tell the user that the conversation will be stored locally in a searchable archive, and
+obtain explicit confirmation. Do not archive silently. When a user asks to stop keeping
+history, run `cleanup.py --apply --confirm-destructive` (or delete the archive directory)
+and stop calling the archiver.
+
 ## Security & privacy
 
 - **Local only** — no network calls, no telemetry, no MCP, no cloud sync.
@@ -119,7 +147,7 @@ instead of the context window.
 - **Owner-only archive, fail-closed** — the archive directory is forced to `0700` and files to `0600` on POSIX; on Windows the DACL is replaced by a protected DACL granting only the current user and LOCAL SYSTEM. Every result is re-read to prove the mode took effect. New database files are created atomically with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600`, so no file ever exists with wider permissions. A symbolic link on the target path is refused. A pre-existing directory owned by another account is refused. If owner-only access cannot be enforced, archiving **aborts and the half-written database is destroyed** (`status: error`, exit 3) instead of storing readable data; `--allow-insecure-storage` is the only way to opt out, and the JSON result then reports `insecure_storage: true`.
 - **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. Rules are validated and **precompiled at startup**: a malformed `redact_rules.json`, a wrong field type or an uncompilable regex aborts the run before any database is created, and a failure while applying a rule aborts instead of skipping it. `session_key` is sanitised **before** it is used for any path or filename — a value outside the safe identifier format (or one that itself looks sensitive) becomes an opaque hash, so it never reaches a filename, the table or the FTS index. The transcript is redacted entirely in memory, then written in a single transaction; on failure the transaction rolls back and only a database created by that same run is removed — an existing archive being appended to is never deleted. High-entropy candidates are excluded from the keyword index. In-place redaction (`--redact-file`) additionally **requires `--allow-dir`** and resolves every symbolic link before comparing paths: the lexical path, the resolved path and the resolved allowed directory must all agree, so a symlinked ancestor inside the allowed directory cannot redirect the write elsewhere. A non-ASCII output path is **refused** by default (exit 8); only an explicit `--allow-dir-fallback` moves the archive to the ASCII fallback directory, and the run then prints a warning and reports `archive_dir_fallback: true` together with `requested_dir` and `archive_dir` — the location is never changed silently.
 - **Data minimisation** — `MAX_ARCHIVE_LENGTH` truncates oversized content (head + tail kept) before storage. Ingestion itself is bounded **before** parsing: at most `--max-session-bytes` (64 MiB) is read from the head of the transcript, a line longer than `--max-line-bytes` (1 MiB) is discarded before JSON or any regex sees it, and ingestion stops at `--max-messages` (200000) or `--max-total-chars` (64 MiB). The result reports `ingest.truncated` and `ingest.truncated_reason`, so a bounded archive is never presented as a complete one. In-place redaction refuses a file larger than 64 MiB before reading it.
-- **Deny-by-default filesystem rules** — `cleanup.py` only deletes files inside the canonical archive directory, only with whitelisted extensions, never through a symbolic link, and never without `--apply`.
+- **Deny-by-default filesystem rules** — `cleanup.py` refuses any directory that lacks the owner-only `.infinity-context-archive` marker, refuses protected directories (filesystem root, home, common user folders), only deletes files whose **full name** matches an InfinityContext artifact pattern, never recurses into subdirectories, re-checks each candidate with `lstat` immediately before deletion, validates the `session_chunks`/`chunk_fts` schema in read-only mode before any `VACUUM`, and does nothing unless **both** `--apply` and `--confirm-destructive` are given.
 
 ### Data sensitivity notice
 
@@ -155,6 +183,9 @@ pinned revision and checksums.
 | ingest character cap | 64 MiB (hard ceiling) | `--max-total-chars` (1..ceiling) |
 | redaction rules | built in | `scripts/session_to_sqlite.py` (add `redact_rules.json` beside it to extend) |
 | retention | 30 days | `cleanup.py --days` (1..3650) |
+| archive marker | `.infinity-context-archive` | written by `session_to_sqlite.py`; `cleanup.py` refuses to run without it |
+| destructive cleanup | requires `--apply --confirm-destructive` | `cleanup.py` |
+| migrate an old archive | `cleanup.py --init-marker` | only after a valid database is found in the directory |
 
 ## Architecture
 
@@ -198,8 +229,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills  # OpenClaw �
 # 方式二：源码（固定已审计 tag + 逐文件校验，禁止使用可变分支）
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.6
-grep -q '^version: "1.6.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.7.0
+grep -q '^version: "1.7.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS：shasum -a 256 -c checksums.txt
 mkdir -p ~/.agents/skills/infinity-context/scripts
 mkdir -p ~/.agents/skills/infinity-context/references

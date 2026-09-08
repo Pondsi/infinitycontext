@@ -92,6 +92,11 @@ MAX_MESSAGES = 200000                      # 单次摄入消息条数上限
 MAX_TOTAL_CHARS = 64 * 1024 * 1024         # 累计正文字符上限
 MAX_REDACT_FILE_BYTES = 64 * 1024 * 1024   # 原地脱敏单文件上限
 
+# T09 (v2.7): 归档身份标记——cleanup.py 只对带此标记的目录执行删除
+MARKER_NAME = '.infinity-context-archive'
+MARKER_APP = 'infinity-context'
+MARKER_VERSION = 1
+
 # session_key 安全白名单：符合则原样使用（仍会过一遍脱敏），否则替换为不透明标识
 SESSION_KEY_SAFE_RE = re.compile(r'^[A-Za-z0-9:_\-.@]{1,128}$')
 
@@ -351,6 +356,32 @@ def _check_limits(pairs):
     for name, value, hard_max in pairs:
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= hard_max:
             raise ValueError(f"{name} must be an integer between 1 and {hard_max}")
+
+
+def ensure_archive_marker(archive_dir):
+    """在已加固的归档目录写入 owner-only 身份标记（幂等）。
+
+    cleanup.py 拒绝清理没有该标记的目录，因此误把 --archive-dir 指向用户目录时
+    也不会递归删除别人的文件。
+    """
+    marker = os.path.join(archive_dir, MARKER_NAME)
+    if os.path.exists(marker):
+        return marker
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        fd = os.open(marker, flags, 0o600)
+    except FileExistsError:
+        return marker
+    from datetime import datetime, timezone
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        json.dump({
+            'app': MARKER_APP,
+            'marker_version': MARKER_VERSION,
+            'created_utc': datetime.now(timezone.utc).isoformat(),
+        }, handle, indent=2)
+        handle.write('\n')
+    _harden(lambda: secure_fs.secure_file(marker), 'archive-marker')
+    return marker
 
 
 def read_messages(session_file, max_bytes=MAX_SESSION_BYTES,
@@ -665,6 +696,14 @@ def main():
             lambda: secure_fs.secure_directory(output_dir), 'archive-directory')
     except secure_fs.UnsafeArchiveError as exc:
         print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
+        sys.exit(3)
+
+    # 阶段 3.5：写入归档身份标记（cleanup.py 只清理带标记的目录）
+    try:
+        ensure_archive_marker(output_dir)
+    except (OSError, secure_fs.UnsafeArchiveError) as exc:
+        print(json.dumps({'status': 'error', 'mode': 'archive',
+                          'error': f'cannot write archive marker: {exc}'}))
         sys.exit(3)
 
     # 文件名只由已净化的 key 生成（安全字符集，不会泄漏敏感信息）

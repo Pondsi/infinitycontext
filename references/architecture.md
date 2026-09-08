@@ -83,8 +83,13 @@ Truncation is never silent: the JSON result carries `ingest.truncated` and
 ### Path and permission rules
 
 `cleanup.py` canonicalises the archive directory, refuses to operate on a relative path,
-only deletes whitelisted extensions, never follows or deletes a symbolic link, and does
-nothing without `--apply`. `search.py` opens the database read-only
+requires the owner-only `.infinity-context-archive` marker, refuses protected directories
+(filesystem root, home, common user folders), deletes only files whose full name matches an
+InfinityContext artifact pattern, never recurses into subdirectories, re-checks every
+candidate with `lstat` immediately before `unlink`, probes the `session_chunks`/`chunk_fts`
+schema read-only before any `VACUUM`, never follows or deletes a symbolic link, and does
+nothing without `--apply --confirm-destructive`. `--init-marker` migrates an archive created
+by an older version, and only after one of our databases is found in the directory. `search.py` opens the database read-only
 (`file:...?mode=ro`). Neither script opens a network socket or spawns a process.
 
 ### Filesystem hardening (T09)
@@ -94,6 +99,7 @@ The archive holds conversation history, so the store is owner-only by constructi
 | Layer | POSIX | Windows |
 |-------|-------|---------|
 | archive directory | `chmod 0700` | protected DACL: current user + LOCAL SYSTEM, inheritance removed |
+| archive marker | `0600`, atomic `O_CREAT\|O_EXCL\|O_NOFOLLOW` | inherits the protected directory DACL |
 | database file | `0600`, created atomically with `O_CREAT\|O_EXCL\|O_NOFOLLOW` | protected DACL granting the file itself (`F`, no `(OI)(CI)`) |
 | `-wal` / `-shm` | `0600` after the WAL pragma and again after the final checkpoint | inherits the protected directory DACL |
 

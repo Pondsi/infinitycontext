@@ -23,10 +23,10 @@ Use a pinned revision and verify every digest before copying. Never copy with a 
 # 1. pinned checkout (audited release tag, never the mutable default branch)
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.6
+git checkout --detach v1.7.0
 
 # 2. the pinned tag must equal the version in SKILL.md frontmatter
-if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.6\.6"' -Quiet)) {
+if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.7\.0"' -Quiet)) {
     throw "tag/version mismatch - stop"
 }
 

@@ -3,6 +3,37 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.7.0 — 2026-09-09
+
+Blast-radius containment for the destructive tools, plus capability disclosure.
+
+### Fixed
+- **`cleanup.py` is bound to a verified archive.** The archiver now writes an owner-only
+  `.infinity-context-archive` marker (JSON: `app`, `marker_version`, `created_utc`) when it
+  secures the archive directory. `cleanup.py` refuses to delete anything in a directory
+  without a valid marker (`app=infinity-context`, supported marker version, regular
+  non-symlink file owned by the current user), and refuses protected directories
+  (filesystem root, the user home and its common subdirectories, system directories).
+  `--init-marker` migrates an archive from an older version, and only after one of our
+  databases is found in the directory.
+- **Deletion scope is a full-filename allowlist, not an extension list.** Only
+  `{safe_key}-YYYYMMDD-HHMMSS.{db,db-wal,db-shm,jsonl,jsonl.bak,bak}` are ever candidates;
+  generic `.json`, `.tmp` and `.bak` files are untouched. Enumeration is non-recursive, and
+  an unexpected subdirectory is skipped with a warning.
+- **`VACUUM` is schema-gated.** A database is opened read-only first and vacuumed only when
+  it really contains `session_chunks` and `chunk_fts`.
+- **A confirmation boundary.** `--apply` now also requires `--confirm-destructive`; the
+  validated scope (canonical root, marker, retention cutoff, file count, bytes) is printed
+  first, and every candidate is re-checked with `lstat` immediately before `unlink`.
+
+### Changed
+- **Capability disclosure.** `SKILL.md` and `README.md` now open with an explicit
+  "Security & Privacy Disclosure (Intended Behavior)" block that names the four local
+  operations (persist, delete, in-place rewrite, path fallback) and their scope controls,
+  and `SKILL.md` adds a first-run consent requirement so the agent asks before archiving.
+  The frontmatter description also names the cleanup and redaction tools, so the declared
+  capability set matches the shipped code.
+
 ## 1.6.6 — 2026-09-09
 
 Reviewer-driven fail-closed fix for the non-ASCII output path.
