@@ -23,9 +23,14 @@ Use a pinned revision and verify every digest before copying. Never copy with a 
 # 1. pinned checkout (audited release tag, never the mutable default branch)
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.3.1
+git checkout --detach v1.6.2
 
-# 2. verify every file against the published digests
+# 2. the pinned tag must equal the version in SKILL.md frontmatter
+if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.6\.2"' -Quiet)) {
+    throw "tag/version mismatch - stop"
+}
+
+# 3. verify every file against the published digests
 $expected = Get-Content openclaw\checksums.txt
 # checksums.txt lines look like:  <sha256>  <path>
 foreach ($line in $expected) {

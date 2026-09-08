@@ -7,6 +7,7 @@ InfinityContext has one portable core and no hidden execution path.
 ```
 session transcript (JSONL)
         │
+        ├─ 0. bound         --max-session-bytes / --max-line-bytes / --max-messages / --max-total-chars
         ├─ 1. redact        session_to_sqlite.py  (fail-closed: nothing is stored if this step fails)
         ├─ 2. truncate      MAX_ARCHIVE_LENGTH    (head + tail kept, middle discarded)
         └─ 3. store         SQLite + FTS5 trigram (session_chunks → chunk_fts trigger)
@@ -57,6 +58,22 @@ The redaction path is fail-closed at every step:
 
 The rule path can be overridden with `INFINITY_CONTEXT_REDACT_RULES`, which is also how
 the regression tests exercise a broken rule file without touching the installed copy.
+
+### Ingestion bounds (T09)
+
+Limits are applied **while reading**, not after the whole transcript has been parsed and
+processed:
+
+| Bound | Default | Flag | Effect |
+|-------|---------|------|--------|
+| transcript bytes | 64 MiB | `--max-session-bytes` | only `cap + 1` bytes are read from the head; a partial trailing line is dropped and `ingest.truncated_reason = file-size-limit:<cap>` is reported |
+| line bytes | 1 MiB | `--max-line-bytes` | the line is discarded **before** `json.loads` or any regex runs; counted in `ingest.skipped_oversized_lines` |
+| message count | 200000 | `--max-messages` | parsing stops; `ingest.truncated_reason = message-count-limit:<cap>` |
+| cumulative characters | 64 MiB | `--max-total-chars` | parsing stops; `ingest.truncated_reason = total-chars-limit:<cap>` |
+| in-place redaction | 64 MiB | `MAX_REDACT_FILE_BYTES` | `--redact-file` refuses the file before reading it |
+
+Truncation is never silent: the JSON result carries `ingest.truncated` and
+`ingest.truncated_reason`, and `SECURITY_WARN: INGEST_TRUNCATED` is printed to stderr.
 
 ### Path and permission rules
 

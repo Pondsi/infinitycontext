@@ -8,9 +8,9 @@
 
 > ⚠️ **Privacy & Data Retention Notice / 隐私与数据留存声明**
 >
-> **EN** — This skill does more than compress context. It (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. `MAX_ARCHIVE_LENGTH` truncates oversized content and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and emails; high-entropy candidates are excluded from the index. **Fail-closed:** if redaction cannot run, the backup is destroyed, never kept in plaintext. Nothing is sent anywhere — no cloud sync, no telemetry, no outbound network. Backups are ACL-restricted to the current user + SYSTEM and pruned after 30 days. The optional **auto-recovery** is opt-in (`enableAutoWake`), sends exactly one validated resume command per monitor round, logs `WAKE_REQUEST` first, and never spawns a notification process; the agent allowlist is deny-by-default. The compaction hook verifies `pipeline.ps1` against `integrity.json` before executing. Run `scripts/cleanup-old-backups.ps1` for manual cleanup and SQLite `VACUUM`.
+> **EN** — This skill does more than compress context. It (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. `MAX_ARCHIVE_LENGTH` truncates oversized content, ingestion is bounded before parsing (file size, line length, message count, cumulative characters) and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and emails; high-entropy candidates are excluded from the index. **Fail-closed:** if redaction cannot run, the backup is destroyed, never kept in plaintext. Nothing is sent anywhere — no cloud sync, no telemetry, no outbound network. Backups are ACL-restricted to the current user + SYSTEM and pruned after 30 days. The optional **auto-recovery** is opt-in (`enableAutoWake`), sends exactly one validated resume command per monitor round, logs `WAKE_REQUEST` first, and never spawns a notification process; the agent allowlist is deny-by-default. The compaction hook verifies `pipeline.ps1` against `integrity.json` before executing. Run `scripts/cleanup-old-backups.ps1` for manual cleanup and SQLite `VACUUM`.
 >
-> **中文** — 本插件不只做上下文压缩：它会在每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入**纯本地 SQLite**（用于 FTS5 检索）。内置 `MAX_ARCHIVE_LENGTH` 截断与正则脱敏（API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱），高熵内容不进索引。**Fail-Closed：脱敏无法执行时直接销毁备份，绝不保留明文。** 不联网、不上传、无遥测；备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。可选的**自动恢复**需显式开启（`enableAutoWake`），每轮最多发送一次经过校验的「继续」指令，执行前先写 `WAKE_REQUEST` 日志，绝不拉起通知进程；Agent 白名单默认拒绝。压缩钩子执行前会校验 `pipeline.ps1` 的 `integrity.json` 摘要。可手动执行 `scripts/cleanup-old-backups.ps1` 清理并 VACUUM。
+> **中文** — 本插件不只做上下文压缩：它会在每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入**纯本地 SQLite**（用于 FTS5 检索）。内置 `MAX_ARCHIVE_LENGTH` 截断、摄入前限流（文件大小 / 单行长度 / 消息条数 / 累计字符）与正则脱敏（API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱），高熵内容不进索引。**Fail-Closed：脱敏无法执行时直接销毁备份，绝不保留明文。** 不联网、不上传、无遥测；备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。可选的**自动恢复**需显式开启（`enableAutoWake`），每轮最多发送一次经过校验的「继续」指令，执行前先写 `WAKE_REQUEST` 日志，绝不拉起通知进程；Agent 白名单默认拒绝。压缩钩子执行前会校验 `pipeline.ps1` 的 `integrity.json` 摘要。可手动执行 `scripts/cleanup-old-backups.ps1` 清理并 VACUUM。
 
 ## Permissions / 权限声明
 
@@ -54,10 +54,11 @@ InfinityContext is a **universal AI agent skill** that keeps your conversations 
 clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
 clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 
-# 2. From source: pin the audited tag, then verify every file
+# 2. From source: pin the reviewed release tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.3.1
+git checkout --detach v1.6.2
+grep -q '^version: "1.6.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 
 # 3. Copy exactly these files (never `cp -r`, never a wildcard)
@@ -125,10 +126,11 @@ InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远�
 clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
 clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 
-# 方式二：源码安装——固定已审计 tag，并逐文件校验
+# 方式二：源码安装——固定已发布 tag（必须等于 SKILL.md 的 version），并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.3.1
+git checkout --detach v1.6.2
+grep -q '^version: "1.6.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 
 # 逐文件显式复制（禁止 cp -r、禁止通配符）

@@ -3,6 +3,33 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.2 — 2026-09-09
+
+Install-instruction and ingestion-bound release. The ClawHub review of 1.6.1 accepted
+the path-resolution fix and raised two remaining findings:
+
+> Source installation instructions pin an obsolete release with known security
+> deficiencies (T08, `SKILL.md:37-40`)
+> Transcript size limits are enforced only after unbounded ingestion and regex
+> processing (T09, `scripts/session_to_sqlite.py`)
+
+### Fixed
+- **T08 — stale source-install pin.** Every quick-start (English, Chinese, OpenClaw
+  integration) now pins the tag that matches the reviewed artifact (`v1.6.2`), and a
+  version guard stops the install when the checked-out `SKILL.md` version differs from
+  the pinned tag. The tag and the frontmatter version are updated in the same commit,
+  so the instructions can no longer drift behind the release.
+- **T09 — limits applied during ingestion, not after it.** `read_messages()` now reads
+  at most `--max-session-bytes` (64 MiB) from the head of the transcript instead of
+  loading the whole file; a line longer than `--max-line-bytes` (1 MiB) is dropped
+  *before* JSON parsing or regex; ingestion stops at `--max-messages` (200000) and
+  `--max-total-chars` (64 MiB). The run reports `ingest.truncated` and
+  `ingest.truncated_reason`, and logs `SECURITY_WARN: INGEST_TRUNCATED`, so a bounded
+  archive is never mistaken for a complete one.
+- `redact_file_in_place()` refuses a file larger than 64 MiB before reading it and
+  reads with the same cap, so in-place redaction can no longer pull an unbounded file
+  into memory.
+
 ## 1.6.1 — 2026-09-09
 
 Path-resolution fix. The ClawHub review of 1.6.0 accepted the previous concerns but
@@ -171,7 +198,7 @@ citizen on both DeepSeek Harness (dsh) and OpenClaw.
   calls (`ctypes`); the directory ACE uses `(OI)(CI)` inheritance while file ACEs use
   plain `F`, and no external tool is spawned.
 - **T08 (unpinned install).** Every quick-start now leads with the registry install and
-  uses `git checkout --detach v1.3.1` plus `sha256sum -c checksums.txt` for source
+  pins the audited release tag and verifies `sha256sum -c checksums.txt` for source
   installs. `cp -r` was replaced by explicit per-file copies in all languages.
 - `SKILL.md` trimmed: the two canonical sections stay, long reference moved to
   `references/`. Frontmatter `description` now leads with the situations that should

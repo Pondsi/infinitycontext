@@ -2,8 +2,9 @@
 # session_to_sqlite.py - 会话 JSONL 转换为 SQLite（支持 FTS5 全文检索）
 # 调用：python session_to_sqlite.py --session-key KEY --session-file FILE --output-dir DIR [--append]
 # 作者：Pondsi
-# 版本：v2.5 (2026-09-09)
+# 版本：v2.6 (2026-09-09)
 
+import io
 import json
 import sqlite3
 import sys
@@ -84,6 +85,13 @@ def _abort_unsecured(db_path, conn, is_new_db, exc):
 MAX_ARCHIVE_LENGTH = 20000
 # 单条消息最大字符数（防止单条巨文本绕过总量限制）
 MAX_MESSAGE_CHARS = 8000
+# T09 (v2.6): 摄入上限——先限流再解析，内存与正则开销有界（ClawdHub 复审 1.6.1）
+MAX_SESSION_BYTES = 64 * 1024 * 1024       # 单个轨迹文件读取上限 64 MiB
+MAX_LINE_BYTES = 1 * 1024 * 1024           # 单行（单条消息）上限 1 MiB
+MAX_MESSAGES = 200000                      # 单次摄入消息条数上限
+MAX_TOTAL_CHARS = 64 * 1024 * 1024         # 累计正文字符上限
+MAX_REDACT_FILE_BYTES = 64 * 1024 * 1024   # 原地脱敏单文件上限
+
 # session_key 安全白名单：符合则原样使用（仍会过一遍脱敏），否则替换为不透明标识
 SESSION_KEY_SAFE_RE = re.compile(r'^[A-Za-z0-9:_\-.@]{1,128}$')
 
@@ -264,6 +272,12 @@ def redact_file_in_place(path, allow_dir=None):
     if not os.path.isfile(abs_target):
         raise ValueError(f"not a regular file: {abs_target}")
 
+    file_size = os.path.getsize(abs_target)
+    if file_size > MAX_REDACT_FILE_BYTES:
+        raise ValueError(
+            f"refusing to redact {abs_target}: {file_size} bytes exceeds the "
+            f"{MAX_REDACT_FILE_BYTES}-byte in-place limit")
+
     getuid = getattr(os, 'getuid', None)
     if getuid is not None and os.lstat(parent).st_uid != getuid():
         raise ValueError(f"parent directory {parent} is owned by another account")
@@ -302,7 +316,7 @@ def redact_file_in_place(path, allow_dir=None):
                 "would redirect the write")
 
     with open(abs_target, 'r', encoding='utf-8-sig', errors='replace') as f:
-        data = f.read()
+        data = f.read(MAX_REDACT_FILE_BYTES + 1)
     redacted = redact_sensitive_info(data)
 
     # 同目录创建不可预测临时文件（mkstemp 内部使用 O_CREAT|O_EXCL，默认 0600）
@@ -327,50 +341,96 @@ def redact_file_in_place(path, allow_dir=None):
     return len(redacted)
 
 
-def read_messages(session_file):
-    """解析轨迹 JSONL；BOM 由 utf-8-sig 透明吞掉。"""
+def read_messages(session_file, max_bytes=MAX_SESSION_BYTES,
+                  max_line_bytes=MAX_LINE_BYTES, max_messages=MAX_MESSAGES,
+                  max_total_chars=MAX_TOTAL_CHARS):
+    """解析轨迹 JSONL；BOM 由 utf-8-sig 透明吞掉。
+
+    T09（v2.6）：所有上限都在**摄入过程中**生效，而不是摄入完成之后——
+      1. 只从文件头读取 max_bytes+1 字节，绝不把整个文件读进内存；
+      2. 超长单行在 json/正则之前就被丢弃（统计到 skipped_oversized_lines）；
+      3. 消息条数 / 累计字符数达到上限立即停止解析。
+    返回 (messages, stats)；stats 如实记录触发了哪一个上限，绝不静默截断。
+    """
+    stats = {
+        'file_bytes': 0,
+        'bytes_read': 0,
+        'messages': 0,
+        'skipped_oversized_lines': 0,
+        'truncated': False,
+        'truncated_reason': '',
+    }
+    try:
+        stats['file_bytes'] = os.path.getsize(session_file)
+    except OSError:
+        stats['file_bytes'] = 0
+
+    with open(session_file, 'rb') as raw:
+        head = raw.read(max_bytes + 1)
+    if len(head) > max_bytes:
+        stats['truncated'] = True
+        stats['truncated_reason'] = f'file-size-limit:{max_bytes}'
+        head = head[:max_bytes]
+        cut = head.rfind(b'\n')
+        head = head[:cut + 1] if cut >= 0 else b''
+    stats['bytes_read'] = len(head)
+
     messages = []
-    with open(session_file, 'r', encoding='utf-8-sig') as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            message = data.get('message', {})
-            if not message:
-                message = data.get('data', {}).get('message', data.get('data', {}))
-            role = message.get('role', 'unknown')
-            content = message.get('content', '')
-            timestamp = data.get('ts', data.get('timestamp', ''))
+    total_chars = 0
+    for line_num, raw_line in enumerate(io.StringIO(head.decode('utf-8-sig', errors='replace')), 1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if len(line.encode('utf-8', errors='replace')) > max_line_bytes:
+            stats['skipped_oversized_lines'] += 1
+            continue
+        if len(messages) >= max_messages:
+            stats['truncated'] = True
+            stats['truncated_reason'] = f'message-count-limit:{max_messages}'
+            break
+        if total_chars >= max_total_chars:
+            stats['truncated'] = True
+            stats['truncated_reason'] = f'total-chars-limit:{max_total_chars}'
+            break
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = data.get('message', {})
+        if not message:
+            message = data.get('data', {}).get('message', data.get('data', {}))
+        role = message.get('role', 'unknown')
+        content = message.get('content', '')
+        timestamp = data.get('ts', data.get('timestamp', ''))
 
-            content_text = ''
-            has_thinking = 0
-            has_tool_calls = 0
-            if isinstance(content, str):
-                content_text = content
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        if item.get('type') == 'text':
-                            content_text += item.get('text', '')
-                        elif item.get('type') == 'thinking':
-                            has_thinking = 1
-                        elif item.get('type') == 'toolCall':
-                            has_tool_calls = 1
+        content_text = ''
+        has_thinking = 0
+        has_tool_calls = 0
+        if isinstance(content, str):
+            content_text = content
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get('type') == 'text':
+                        content_text += item.get('text', '')
+                    elif item.get('type') == 'thinking':
+                        has_thinking = 1
+                    elif item.get('type') == 'toolCall':
+                        has_tool_calls = 1
 
-            if content_text:
-                messages.append({
-                    'id': line_num,
-                    'role': role,
-                    'content': content_text,
-                    'timestamp': timestamp,
-                    'has_thinking': has_thinking,
-                    'has_tool_calls': has_tool_calls
-                })
-    return messages
+        if content_text:
+            total_chars += len(content_text)
+            messages.append({
+                'id': line_num,
+                'role': role,
+                'content': content_text,
+                'timestamp': timestamp,
+                'has_thinking': has_thinking,
+                'has_tool_calls': has_tool_calls
+            })
+
+    stats['messages'] = len(messages)
+    return messages, stats
 
 
 def build_records(session_key, messages):
@@ -463,6 +523,14 @@ def main():
     parser.add_argument('--redact-file', help='Redact sensitive data in-place in the given file, then exit')
     parser.add_argument('--allow-dir', default=None,
                         help='with --redact-file: refuse any path outside this directory')
+    parser.add_argument('--max-session-bytes', type=int, default=MAX_SESSION_BYTES,
+                        help='maximum bytes read from the transcript (default 64 MiB)')
+    parser.add_argument('--max-line-bytes', type=int, default=MAX_LINE_BYTES,
+                        help='maximum bytes per transcript line (default 1 MiB)')
+    parser.add_argument('--max-messages', type=int, default=MAX_MESSAGES,
+                        help='maximum number of messages ingested (default 200000)')
+    parser.add_argument('--max-total-chars', type=int, default=MAX_TOTAL_CHARS,
+                        help='maximum cumulative content characters (default 64 MiB)')
     parser.add_argument('--allow-insecure-storage', action='store_true', default=False,
                         help='DANGEROUS: keep archiving even if owner-only permissions '
                              'cannot be enforced. Only for trusted single-user filesystems.')
@@ -514,11 +582,24 @@ def main():
 
     # 阶段 2：读取轨迹并在内存中完成全量脱敏（此时尚未创建任何数据库文件）
     try:
-        messages = read_messages(session_file)
+        messages, ingest = read_messages(
+            session_file,
+            max_bytes=args.max_session_bytes,
+            max_line_bytes=args.max_line_bytes,
+            max_messages=args.max_messages,
+            max_total_chars=args.max_total_chars,
+        )
     except OSError as exc:
         print(json.dumps({'status': 'error', 'mode': 'archive',
                           'error': f'cannot read transcript: {exc}'}))
         sys.exit(4)
+    if ingest['truncated']:
+        print(f"SECURITY_WARN: INGEST_TRUNCATED reason={ingest['truncated_reason']} "
+              f"messages={ingest['messages']}", file=sys.stderr)
+    if ingest['skipped_oversized_lines']:
+        print(f"SECURITY_WARN: INGEST_SKIPPED_OVERSIZED_LINES "
+              f"count={ingest['skipped_oversized_lines']}", file=sys.stderr)
+
     try:
         records = build_records(session_key, messages)
     except RedactionConfigError as exc:
@@ -662,6 +743,7 @@ def main():
         'requested_dir': requested_dir,
         'archive_dir_fallback': archive_dir_fallback,
         'permissions_enforced': bool(permissions_enforced),
+        'ingest': ingest,
         'insecure_storage': bool(_INSECURE_WARNINGS),
         'warnings': list(_INSECURE_WARNINGS)
     }
