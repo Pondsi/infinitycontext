@@ -22,6 +22,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# T09：归档目录所有权校验（同目录模块，随包分发）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import secure_fs  # noqa: E402
+
 DEFAULT_HOME = Path(os.environ.get("INFINITY_CONTEXT_HOME") or (Path.home() / ".infinity-context"))
 DEFAULT_ARCHIVE = DEFAULT_HOME / "archive"
 
@@ -37,6 +41,11 @@ def pick_db(args) -> Path:
     archive = Path(args.archive_dir).expanduser().resolve()
     if not archive.is_dir():
         raise SystemExit(f"ARCHIVE_MISSING: {archive}")
+    # T09：拒绝读取属于其它本地账号的归档目录
+    try:
+        secure_fs.assert_safe_directory(archive)
+    except secure_fs.UnsafeArchiveError as exc:
+        raise SystemExit(f"SECURITY: {exc}")
     dbs = sorted((p for p in archive.glob("*.db") if p.is_file()),
                  key=lambda p: p.stat().st_mtime, reverse=True)
     if not dbs:

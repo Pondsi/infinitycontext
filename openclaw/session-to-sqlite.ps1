@@ -11,7 +11,8 @@ param(
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
+
 # ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
 function Get-PythonExe {
     $cands = New-Object System.Collections.ArrayList

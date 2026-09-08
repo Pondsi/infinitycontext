@@ -3,6 +3,43 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.3.1 — 2026-09-09
+
+Security-hardening release. Closes the two remaining audit warnings (T09 archive
+permissions, T08 unpinned install instructions) and makes the skill a first-class
+citizen on both DeepSeek Harness (dsh) and OpenClaw.
+
+### Added
+- `scripts/secure_fs.py` — owner-only filesystem hardening. POSIX forces `0700` on the
+  archive directory and `0600` on files; Windows replaces the DACL with a protected DACL
+  granting only the current user and LOCAL SYSTEM. Database files are created atomically
+  with `os.open(..., 0o600)`, so no file ever exists with wider permissions (TOCTOU
+  removed). A pre-existing directory owned by another account is refused; a merely
+  over-permissive one is tightened; an unenforceable filesystem produces a loud warning
+  and `permissions_enforced: false` in the JSON result.
+- `checksums.txt` at the repository root: SHA-256 of every published file (except
+  itself), so a source install can be verified byte-for-byte.
+- `.gitattributes` (`* -text`) so checkouts are byte-identical on every platform and the
+  manifest stays valid.
+- `references/languages.md` — the localised summaries moved out of `SKILL.md`.
+
+### Changed
+- **T09 (archive permissions).** The archive directory, the database and the `-wal`/`-shm`
+  sidecars are owner-only. Windows ACLs are written with in-process Win32 security API
+  calls (`ctypes`); the directory ACE uses `(OI)(CI)` inheritance while file ACEs use
+  plain `F`, and no external tool is spawned.
+- **T08 (unpinned install).** Every quick-start now leads with the registry install and
+  uses `git checkout --detach v1.3.1` plus `sha256sum -c checksums.txt` for source
+  installs. `cp -r` was replaced by explicit per-file copies in all languages.
+- `SKILL.md` trimmed: the two canonical sections stay, long reference moved to
+  `references/`. Frontmatter `description` now leads with the situations that should
+  trigger the skill.
+- `cleanup.py` and `search.py` refuse an archive directory owned by another account.
+
+### DeepSeek Harness (dsh) and OpenClaw
+- Both are documented as out-of-the-box hosts with an explicit install command for each.
+- `openclaw/README.md` install steps now copy the shared Python engine and its helper.
+
 ## 1.3.0 — 2026-09-09
 
 Structural release: the portable core and the OpenClaw/Windows integration are now

@@ -9,7 +9,8 @@ param(
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Continue'
+
 # ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
 function Get-PythonExe {
     # T07：不做 PATH 搜索，只扫标准安装位置与注册表
@@ -44,7 +45,8 @@ $PyExe = Get-PythonExe
 $ScriptDir = $PSScriptRoot
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\trajectory-exports"
 $SqliteDir = "$env:USERPROFILE\.openclaw\sqlite-data"
-$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\compaction-pipeline.log"
+$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\compaction-pipeline.log"
+
 
 # Directory creation guard: ensure log/backup/sqlite dirs exist before writing
 foreach ($d in @((Split-Path $LogFile -Parent), "$env:LOCALAPPDATA\.openclaw\backups\trajectory-exports", "$env:USERPROFILE\.openclaw\sqlite-data")) {

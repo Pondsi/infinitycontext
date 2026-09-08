@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # session_to_sqlite.py - 会话 JSONL 转换为 SQLite（支持 FTS5 全文检索）
 # 调用：python session_to_sqlite.py --session-key KEY --session-file FILE --output-dir DIR [--append]
-# 作者：大龙虾
-# 版本：v2.1 (2026-09-08)
+# 作者：Pondsi
+# 版本：v2.3 (2026-09-09)
 
 import json
 import sqlite3
@@ -10,6 +10,10 @@ import sys
 import os
 import re
 import argparse
+
+# T09 (v2.3): 归档目录/文件强制 owner-only 权限（同目录模块，随包分发）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import secure_fs  # noqa: E402
 
 
 # ============================================================================
@@ -123,9 +127,12 @@ def redact_file_in_place(path):
         data = f.read()
     redacted = redact_sensitive_info(data)
     tmp = path + '.redact.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
+    # T09：以 0600 原子创建临时文件，杜绝「先建后 chmod」的时间差
+    fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
         f.write(redacted)
     os.replace(tmp, path)
+    secure_fs.secure_file(path)
     return len(redacted)
 
 def main():
@@ -155,8 +162,12 @@ def main():
     output_dir = args.output_dir
     append_mode = args.append
 
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
+    # T09：归档目录强制 owner-only（不存在则创建，已存在则收紧/拒绝）
+    try:
+        permissions_enforced = secure_fs.secure_directory(output_dir)
+    except secure_fs.UnsafeArchiveError as exc:
+        print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
+        sys.exit(3)
 
     # Generate SQLite filename
     safe_key = re.sub(r'[^a-zA-Z0-9_-]', '_', session_key)
@@ -169,7 +180,8 @@ def main():
     except UnicodeEncodeError:
         # Path contains non-ASCII, use fallback
         ascii_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sqlite-data')
-        os.makedirs(ascii_dir, exist_ok=True)
+        ascii_ok = secure_fs.secure_directory(ascii_dir)
+        permissions_enforced = bool(permissions_enforced and ascii_ok)
         output_dir = ascii_dir
 
     if append_mode:
@@ -191,6 +203,9 @@ def main():
     if not os.path.exists(python_exe):
         python_exe = sys.executable
 
+    # T09：数据库文件以 0600 原子创建（Windows 下随后收紧 ACL），再连接
+    secure_fs.secure_file(db_path)
+
     # Create SQLite connection
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -199,6 +214,9 @@ def main():
     cursor.execute('PRAGMA journal_mode = WAL')
     cursor.execute('PRAGMA busy_timeout = 5000')
     cursor.execute('PRAGMA synchronous = NORMAL')
+
+    # T09：WAL 模式会产生 -wal/-shm 旁文件，一并收紧
+    secure_fs.secure_sidecars(db_path)
 
     # Create main table
     cursor.execute('''
@@ -379,6 +397,8 @@ def main():
 
     conn.commit()
     cursor.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    # T09：checkpoint 可能重建旁文件，收尾再收紧一次
+    secure_fs.secure_sidecars(db_path)
 
     # Statistics
     cursor.execute('SELECT COUNT(*) FROM session_chunks WHERE session_key = ?', (session_key,))
@@ -395,7 +415,8 @@ def main():
         'total_chunks': total_chunks,
         'chunk_id_range': [min_id, max_id],
         'msg_id_range': [min_msg, max_msg],
-        'append_mode': append_mode
+        'append_mode': append_mode,
+        'permissions_enforced': bool(permissions_enforced)
     }
     print(json.dumps(result, ensure_ascii=False))
 

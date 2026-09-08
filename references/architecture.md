@@ -13,6 +13,7 @@ session transcript (JSONL)
                 │
                 └─ 4. retrieve   search.py  (read-only FTS5 with LIKE fallback)
                     5. prune     cleanup.py (retention, canonical path anchoring, VACUUM)
+                    6. protect   secure_fs.py (owner-only directory, database and WAL sidecars)
 ```
 
 ### Why an archive instead of a bigger window
@@ -48,3 +49,21 @@ is not written — the pipeline is fail-closed rather than fail-open.
 only deletes whitelisted extensions, never follows or deletes a symbolic link, and does
 nothing without `--apply`. `search.py` opens the database read-only
 (`file:...?mode=ro`). Neither script opens a network socket or spawns a process.
+
+### Filesystem hardening (T09)
+
+The archive holds conversation history, so the store is owner-only by construction:
+
+| Layer | POSIX | Windows |
+|-------|-------|---------|
+| archive directory | `chmod 0700` | protected DACL: current user + LOCAL SYSTEM, inheritance removed |
+| database file | `0600`, created atomically with `os.open(..., 0o600)` | protected DACL granting the file itself (`F`, no `(OI)(CI)`) |
+| `-wal` / `-shm` | `0600` after the WAL pragma and again after the final checkpoint | inherits the protected directory DACL |
+
+Creating the file with `os.open(..., 0o600)` removes the check-then-chmod window in
+which a freshly created database could be world-readable (TOCTOU). A pre-existing
+archive directory owned by another account is refused outright; a directory that is
+merely too permissive is tightened. Windows ACLs are written with in-process Win32
+security API calls (`ctypes`), not by spawning `icacls`. If a filesystem cannot enforce
+owner-only access, the script prints a `SECURITY_WARN` and reports
+`permissions_enforced: false` in its JSON result instead of failing silently.

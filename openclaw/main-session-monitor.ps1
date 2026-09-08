@@ -37,7 +37,8 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'SilentlyContinue'
-$ProgressPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+
 # ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
 function Get-PythonExe {
     # T07：不做 PATH 搜索，只扫标准安装位置与注册表
@@ -65,7 +66,8 @@ function Get-PythonExe {
     }
     return $null
 }
-$PyExe = Get-PythonExe
+$PyExe = Get-PythonExe
+
 # ===== T09 安全修复：OpenClaw CLI 可信调用器（无 cmd.exe / 无 shell 字符串拼接）=====
 # 审计要求：不得通过 shell 解释器传入未校验的会话元数据。
 # 这里解析出 node.exe + openclaw.mjs 的绝对路径，以参数数组直接调用，杜绝 shell 解释。
@@ -185,7 +187,8 @@ $WakeCooldownMin = 30          # v5.5：同一会话失败唤醒冷却（分钟�
 $WakeIdleMin = 4               # v5.5：会话尾部无新写入超过此分钟数才判定失败（防误判进行中）
 $StickyLimit = 5              # 连续失败 5 次 → 暂停该会话自动重试 30 分钟
 $StickyPauseMin = 30          # sticky 暂停时长（分钟）
-$EmergencyPct = 100.0         # 超过窗口 100% = 紧急态：不暂停，每轮必试压缩
+$EmergencyPct = 100.0         # 超过窗口 100% = 紧急态：不暂停，每轮必试压缩
+
 # ===== T05 安全合规配置（默认拒绝 / Deny by Default）=====
 # 白名单解析优先级：
 #   1) 环境变量 INFINITY_CONTEXT_AGENTS（逗号分隔，例：main,yai）
@@ -229,7 +232,8 @@ try {
 
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\sessions"   # 压缩前 transcript 备份
 $LockFile = "$env:USERPROFILE\.openclaw\main-session-monitor.lock"
-$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\main-session-monitor.log"
+$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\main-session-monitor.log"
+
 
 # Directory creation guard: ensure log/backup dirs exist before writing
 foreach ($d in @((Split-Path $LogFile -Parent), $BackupDir)) {
@@ -614,7 +618,8 @@ try {
     foreach ($s in $sessions) {
         $key = [string]$s.key
         if ($key -match 'weixin|wechat') { continue }
-        if ([string]$s.status -eq 'killed') { continue }
+        if ([string]$s.status -eq 'killed') { continue }
+
         # T05 安全修复：白名单强制拦截——仅处理授权 Agent 的会话，禁止越权跨 Agent 操作
         # agentId 缺失时从 session key（agent:<id>:...）推导，仍须通过白名单校验
         $agentId = [string]$s.agentId

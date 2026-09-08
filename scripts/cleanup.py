@@ -23,6 +23,10 @@ import sys
 import time
 from pathlib import Path
 
+# T09：归档目录所有权校验（同目录模块，随包分发）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import secure_fs  # noqa: E402
+
 DEFAULT_HOME = Path(os.environ.get("INFINITY_CONTEXT_HOME") or (Path.home() / ".infinity-context"))
 DEFAULT_ARCHIVE = DEFAULT_HOME / "archive"
 
@@ -73,6 +77,13 @@ def main() -> int:
     if not archive.is_dir():
         print(f"ARCHIVE_MISSING: {archive}")
         return 0
+
+    # T09：拒绝操作属于其它本地账号的归档目录
+    try:
+        secure_fs.assert_safe_directory(archive)
+    except secure_fs.UnsafeArchiveError as exc:
+        print(f"SECURITY: {exc}", file=sys.stderr)
+        return 2
 
     cutoff = time.time() - args.days * 86400
     deleted = 0

@@ -25,7 +25,7 @@ Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
 
 **Not declared because not used: network, MCP.** No data leaves the machine.
 
-> **Registry package note**: ClawHub and similar registries reject packages that contain self-executing JavaScript, so this package ships **no `.js` files**. The optional OpenClaw compaction hook (`src/handler.js`, `src/HOOK.md`, `src/integrity.json`) is distributed in the **GitHub repository only**. Everything in this package runs as scripts that the agent invokes through its declared tools.
+> **Registry package note**: ClawHub and similar registries reject packages that contain self-executing JavaScript, so this package ships **no `.js` files**. The optional OpenClaw compaction hook (`openclaw/handler.js`, `openclaw/HOOK.md`, `openclaw/integrity.json`) is distributed in the **GitHub repository only**. Everything in this package runs as scripts that the agent invokes through its declared tools.
 
 When you install that hook from the GitHub repository, it launches exactly one subprocess: `pipeline.ps1`, resolved from the hook's own directory (never from `PATH`), verified against `integrity.json` (SHA-256) before execution, and run through the absolute `System32` path of `powershell.exe` with an argument array. No shell, no string interpolation, no `-Command`.
 
@@ -50,17 +50,24 @@ InfinityContext is a **universal AI agent skill** that keeps your conversations 
 ### Quick Start
 
 ```bash
-# 1. Clone the repository
+# 1. Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+
+# 2. From source: pin the audited tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
+cd infinitycontext
+git checkout --detach v1.3.1
+sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 
-# 2. Install the portable core (dsh / Claude Code)
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
+# 3. Copy exactly these files (never `cp -r`, never a wildcard)
+mkdir -p ~/.agents/skills/infinity-context/scripts
+mkdir -p ~/.agents/skills/infinity-context/references
+cp SKILL.md README.md 说明.md CHANGELOG.md SPONSORS.md LICENSE ~/.agents/skills/infinity-context/
+cp scripts/session_to_sqlite.py scripts/search.py scripts/cleanup.py scripts/secure_fs.py ~/.agents/skills/infinity-context/scripts/
+cp references/architecture.md references/languages.md ~/.agents/skills/infinity-context/references/
 
-# 3. Optional OpenClaw automation: see openclaw/README.md
-
-# 4. Restart gateway
-openclaw gateway restart
+# 4. Optional OpenClaw compaction automation: see openclaw/README.md
+# 5. Restart your host (dsh: restart dsh; OpenClaw: openclaw gateway restart)
 ```
 
 ### How It Works
@@ -111,17 +118,24 @@ InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远�
 ### 快速开始
 
 ```bash
-# 1. 克隆仓库
+# 方式一：注册表安装（已扫描产物，无需 git、无需构建）
+clawhub install infinity-context --workdir ~/.agents --dir skills
+
+# 方式二：源码安装——固定已审计 tag，并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
+cd infinitycontext
+git checkout --detach v1.3.1
+sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 
-# 2. 安装可移植核心（dsh / Claude Code）
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
+# 逐文件显式复制（禁止 cp -r、禁止通配符）
+mkdir -p ~/.agents/skills/infinity-context/scripts
+mkdir -p ~/.agents/skills/infinity-context/references
+cp SKILL.md README.md 说明.md CHANGELOG.md SPONSORS.md LICENSE ~/.agents/skills/infinity-context/
+cp scripts/session_to_sqlite.py scripts/search.py scripts/cleanup.py scripts/secure_fs.py ~/.agents/skills/infinity-context/scripts/
+cp references/architecture.md references/languages.md ~/.agents/skills/infinity-context/references/
 
-# 3. 可选 OpenClaw 自动化：见 openclaw/README.md
-
-# 4. 重启 Gateway
-openclaw gateway restart
+# 可选 OpenClaw 压缩自动化：见 openclaw/README.md
+# 重启宿主（dsh：重启 dsh；OpenClaw：openclaw gateway restart）
 ```
 
 ### 工作原理
@@ -164,10 +178,9 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 ### 快速開始
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### 許可證
@@ -192,10 +205,9 @@ InfinityContext は、小規模モデル（128K コンテキスト）のコン�
 ### クイックスタート
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### ライセンス
@@ -220,10 +232,9 @@ InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플
 ### 빠른 시작
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### 라이선스
@@ -248,10 +259,9 @@ InfinityContext es un Skill de OpenClaw que previene el desbordamiento de contex
 ### Inicio Rápido
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### Licencia
@@ -276,10 +286,9 @@ InfinityContext é um Skill do OpenClaw que previne o transbordamento de context
 ### Início Rápido
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### Licença
@@ -304,10 +313,9 @@ InfinityContext est un Skill OpenClaw qui empêche le débordement de contexte d
 ### Démarrage Rapide
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### Licence
@@ -332,10 +340,9 @@ InfinityContext ist ein OpenClaw-Skill, der Kontext-Überlauf in kleinen Modelle
 ### Schnellstart
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### Lizenz
@@ -360,10 +367,9 @@ InfinityContext — это навык OpenClaw, предотвращающий �
 ### Быстрый старт
 
 ```bash
-git clone https://github.com/Pondsi/infinitycontext.git
-mkdir -p ~/.agents/skills/infinity-context
-cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
-openclaw gateway restart
+# Registry install (scanned artifact, no git, no build step)
+clawhub install infinity-context --workdir ~/.agents --dir skills
+# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
 ### Лицензия
