@@ -83,25 +83,30 @@ Get-ChildItem -LiteralPath $ResolvedTarget -Recurse -File -ErrorAction SilentlyC
 $VacuumMinMB = 10
 
 function Get-PythonExe {
-    $cands = New-Object System.Collections.ArrayList
-    foreach ($n in @('python3','python','py')) {
-        $cmd = Get-Command $n -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
-    }
-    foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
-        Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
-    }
-    foreach ($c in $cands) {
-        if ($c -and (Test-Path -LiteralPath $c)) {
-            $ok = $false
-            try {
-                $prevEap = $ErrorActionPreference
-                $ErrorActionPreference = 'Continue'
-                $t = & $c -c "print(1)" 2>$null
-                if ("$t" -match '1') { $ok = $true }
-            } catch {} finally { $ErrorActionPreference = $prevEap }
-            if ($ok) { return $c }
+    # T07（1.8.1）：不做 PATH 解析、不探测执行候选程序。
+    #   1) 只接受显式可信根目录下的 python.exe（Program Files / LOCALAPPDATA\Programs\Python / C:\Python3*）
+    #   2) 允许用 INFINITY_CONTEXT_PYTHON 指定绝对路径，但必须是 python.exe 且真实存在
+    #   3) 候选只做存在性校验，不做 "print(1)" 执行探针——不执行未经信任的程序
+    if ($env:INFINITY_CONTEXT_PYTHON) {
+        $ov = $env:INFINITY_CONTEXT_PYTHON
+        if ([System.IO.Path]::IsPathRooted($ov) -and
+            (Test-Path -LiteralPath $ov -PathType Leaf) -and
+            ([System.IO.Path]::GetFileName($ov) -ieq 'python.exe')) {
+            return $ov
         }
+        Write-Warning "INFINITY_CONTEXT_PYTHON is not an absolute python.exe path, ignored: $ov"
+    }
+
+    $roots = @(
+        "$env:ProgramFiles\Python3*",
+        "${env:ProgramFiles(x86)}\Python3*",
+        "$env:LOCALAPPDATA\Programs\Python\Python3*",
+        'C:\Python3*'
+    )
+    foreach ($pat in $roots) {
+        $hit = Get-ChildItem -Path $pat -Filter 'python.exe' -File -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($hit -and (Test-Path -LiteralPath $hit.FullName -PathType Leaf)) { return $hit.FullName }
     }
     return $null
 }

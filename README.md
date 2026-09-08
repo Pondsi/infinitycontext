@@ -82,8 +82,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 2. From source: pin the reviewed release tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.0
-grep -q '^version: "1.8.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.1
+grep -q '^version: "1.8.1"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 
 # 3. Optional OpenClaw compaction automation: see openclaw/README.md
@@ -148,8 +148,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 方式二：源码安装——固定已发布 tag（必须等于 SKILL.md 的 version），并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.0
-grep -q '^version: "1.8.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.1
+grep -q '^version: "1.8.1"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 
 # 可选 OpenClaw 压缩自动化：见 openclaw/README.md

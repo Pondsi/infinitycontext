@@ -3,6 +3,24 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.1 — 2026-09-09
+
+Packaging boundary fix found by the ClawHub review of 1.8.0.
+
+### Fixed
+- **The published artifact now contains only the portable Python core.** The registry
+  package previously shipped the repository's `openclaw/` folder as well, which
+  contradicted the documented boundary ("no JavaScript, no PowerShell") and left
+  executable hook files outside the root integrity manifest. `openclaw/` stays in the
+  repository with its own `openclaw/checksums.txt`, and is no longer part of the
+  published skill: the artifact is exactly the 14 files listed in `checksums.txt`.
+- **`openclaw/cleanup-old-backups.ps1` no longer resolves Python through `PATH`.**
+  The `Get-Command python3/python/py` lookup and the `print(1)` execution probe are
+  gone. Python is taken only from an explicit root (`Program Files`, `Program Files
+  (x86)`, `%LOCALAPPDATA%\Programs\Python`, `C:\Python3*`) or from the
+  `INFINITY_CONTEXT_PYTHON` absolute-path override, and candidates are validated by
+  existence only — never executed before being trusted.
+
 ## 1.8.0 — 2026-09-09
 
 Bounded persistence: the archive now has a retention ceiling by default, an off switch,
