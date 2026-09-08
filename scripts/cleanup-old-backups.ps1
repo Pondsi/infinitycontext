@@ -79,4 +79,64 @@ Get-ChildItem -LiteralPath $ResolvedTarget -Recurse -File -ErrorAction SilentlyC
         }
     }
 
-Write-Output "清理完成，共安全清除 $deleted 个过期备份文件（保留期：$RetentionDays 天，范围：$ResolvedTarget）。"
+# ---------- 4. SQLite 空间回收（VACUUM，避免长期会话 DB 只膨胀不缩小）----------
+$VacuumMinMB = 10
+
+function Get-PythonExe {
+    $cands = New-Object System.Collections.ArrayList
+    foreach ($n in @('python3','python','py')) {
+        $cmd = Get-Command $n -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
+    }
+    foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
+        Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
+    }
+    foreach ($c in $cands) {
+        if ($c -and (Test-Path -LiteralPath $c)) {
+            $ok = $false
+            try {
+                $prevEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $t = & $c -c "print(1)" 2>$null
+                if ("$t" -match '1') { $ok = $true }
+            } catch {} finally { $ErrorActionPreference = $prevEap }
+            if ($ok) { return $c }
+        }
+    }
+    return $null
+}
+
+$PyExe = Get-PythonExe
+$vacuumed = 0
+if ($PyExe) {
+    $pyVacuum = @'
+import sqlite3, sys
+try:
+    c = sqlite3.connect(sys.argv[1])
+    c.execute('PRAGMA busy_timeout=5000')
+    c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    c.execute('VACUUM')
+    c.close()
+    print('OK')
+except Exception as e:
+    print('ERR:' + str(e))
+'@
+    $pyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("ic-vacuum-" + [guid]::NewGuid().ToString('N') + ".py")
+    Set-Content -LiteralPath $pyFile -Value $pyVacuum -Encoding UTF8
+    try {
+        Get-ChildItem -LiteralPath $ResolvedTarget -Recurse -File -Filter *.db -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -gt ($VacuumMinMB * 1MB) -and -not ($_.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) } |
+            ForEach-Object {
+                if ($PSCmdlet.ShouldProcess($_.FullName, "VACUUM 回收 SQLite 磁盘碎片")) {
+                    $r = & $PyExe $pyFile $_.FullName 2>&1 | Out-String
+                    if ($r -match 'OK') { $vacuumed++ } else { Write-Warning "VACUUM 失败: $($_.Name) $($r.Trim())" }
+                }
+            }
+    } finally {
+        Remove-Item -LiteralPath $pyFile -Force -ErrorAction SilentlyContinue
+    }
+} else {
+    Write-Warning 'VACUUM 跳过：未找到可用的 Python 解释器'
+}
+
+Write-Output "清理完成，共安全清除 $deleted 个过期备份文件（保留期：$RetentionDays 天，范围：$ResolvedTarget），VACUUM 整理 $vacuumed 个 SQLite 数据库。"

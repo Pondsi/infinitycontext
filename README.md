@@ -6,6 +6,25 @@
 
 ---
 
+> ⚠️ **Privacy & Data Retention Notice / 隐私与数据留存声明**
+>
+> **EN** — This skill does more than compress context. It (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. `MAX_ARCHIVE_LENGTH` truncates oversized content and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and emails; high-entropy candidates are excluded from the index. Nothing is sent anywhere — no cloud sync, no telemetry, no outbound network. Backups are ACL-restricted to the current user + SYSTEM and pruned after 30 days. Auto-wake is off by default and the agent allowlist is deny-by-default. Run `scripts/cleanup-old-backups.ps1` for manual cleanup and SQLite `VACUUM`.
+>
+> **中文** — 本插件不只做上下文压缩：它会在每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入**纯本地 SQLite**（用于 FTS5 检索）。内置 `MAX_ARCHIVE_LENGTH` 截断与正则脱敏（API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱），高熵内容不进索引。不联网、不上传、无遥测；备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。自动唤醒默认关闭，Agent 白名单默认拒绝。可手动执行 `scripts/cleanup-old-backups.ps1` 清理并 VACUUM。
+
+## Permissions / 权限声明
+
+Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
+
+| Capability | Used for |
+|-----------|----------|
+| Shell / process | Launching the `openclaw` CLI and PowerShell helpers (argument arrays only — no shell string interpolation) |
+| File read | Reading session trajectory JSONL and local config files |
+| File write | Writing the SQLite archive, logs, and redacted trajectory backups under `%LOCALAPPDATA%` / `%USERPROFILE%` |
+| Environment | Reading `LOCALAPPDATA`, `USERPROFILE`, and `INFINITY_CONTEXT_AGENTS` |
+
+**Not declared because not used: network, MCP.** No data leaves the machine.
+
 ## English
 
 ### What is this?

@@ -30,8 +30,14 @@ function Get-PythonExe {
     }
     foreach ($c in $cands) {
         if ($c -and (Test-Path $c)) {
-            $t = & $c -c "print(1)" 2>$null
-            if ("$t" -match '1') { return $c }
+            $ok = $false
+            try {
+                $prevEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $t = & $c -c "print(1)" 2>$null
+                if ("$t" -match '1') { $ok = $true }
+            } catch {} finally { $ErrorActionPreference = $prevEap }
+            if ($ok) { return $c }
         }
     }
     return $null

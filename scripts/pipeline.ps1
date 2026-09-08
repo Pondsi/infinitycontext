@@ -28,8 +28,14 @@ function Get-PythonExe {
     }
     foreach ($c in $cands) {
         if ($c -and (Test-Path $c)) {
-            $t = & $c -c "print(1)" 2>$null
-            if ("$t" -match '1') { return $c }
+            $ok = $false
+            try {
+                $prevEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $t = & $c -c "print(1)" 2>$null
+                if ("$t" -match '1') { $ok = $true }
+            } catch {} finally { $ErrorActionPreference = $prevEap }
+            if ($ok) { return $c }
         }
     }
     return $null
@@ -92,6 +98,46 @@ if (-not $AgentId -or $AgentId -notin $AllowedAgents) {
 }
 # ================================================
 
+# ===== T09 安全修复（v7.2）：轨迹备份安全策略 =====
+$TrajectoryRetentionDays = 30       # 轨迹备份保留天数（超期自动清理）
+$RedactTrajectoryBackup = $true     # 备份落地前脱敏（数据最小化，默认开启）
+$AllowUnredactedBackup = $false     # 显式 opt-in：仅在需要完整灾难恢复时开启
+
+# 仅授权 当前用户 + SYSTEM 访问备份目录（移除继承 ACL）
+function Protect-BackupAcl([string]$Path) {
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        $me = "$env:USERDOMAIN\$env:USERNAME"
+        & icacls $Path /inheritance:r /grant:r "${me}:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 2>&1 | Out-Null
+    } catch { Write-Log "ACL_ERR: $Path $_" }
+}
+
+# 保留期清理：删除超期轨迹备份
+function Remove-ExpiredBackups {
+    try {
+        if (-not (Test-Path -LiteralPath $BackupDir)) { return }
+        $cutoff = (Get-Date).AddDays(-$TrajectoryRetentionDays)
+        Get-ChildItem -LiteralPath $BackupDir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoff } |
+            ForEach-Object {
+                try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Log "RETENTION_PURGE: $($_.Name)" } catch {}
+            }
+    } catch { Write-Log "RETENTION_ERR: $_" }
+}
+
+# 对轨迹文件原地脱敏（复用 Python 脱敏引擎，避免规则重复维护）
+function Redact-TrajectoryFile([string]$EventsPath) {
+    if (-not $RedactTrajectoryBackup -or $AllowUnredactedBackup) { return }
+    if (-not $PyExe) { Write-Log 'REDACT_SKIP: python not found'; return }
+    $pyScript = Join-Path $ScriptDir 'session_to_sqlite.py'
+    if (-not (Test-Path -LiteralPath $pyScript)) { Write-Log 'REDACT_SKIP: redactor not found'; return }
+    try {
+        $out = & $PyExe $pyScript '--redact-file' $EventsPath 2>&1 | Out-String
+        Write-Log "REDACT_TRAJECTORY: $(Split-Path $EventsPath -Leaf) -> $($out.Trim())"
+    } catch { Write-Log "REDACT_ERR: $_" }
+}
+# ================================================
+
 function Export-Trajectory($key) {
     # Get session metadata for agentId
     try {
@@ -128,12 +174,19 @@ function Export-Trajectory($key) {
                     Move-Item -Path (Join-Path $srcDir '*') -Destination $destDir -Force -ErrorAction Stop
                     Remove-Item -Path $srcDir -Recurse -Force -ErrorAction SilentlyContinue
                     $eventsPath = Join-Path $destDir 'events.jsonl'
+                    # T09 安全修复：目录 ACL 收紧到 当前用户 + SYSTEM
+                    Protect-BackupAcl $destDir
+                    Protect-BackupAcl $BackupDir
+                    # T09 安全修复：落地前脱敏（数据最小化）
+                    Redact-TrajectoryFile $eventsPath
                     Write-Log "HOOK_BEFORE: BACKUP MOVED: $key -> $destDir (events=$($exportData.transcriptEventCount))"
                     return @{ ExportDir = $destDir; EventsPath = $eventsPath; AgentId = $sess.agentId }
                 } catch {
-                    Write-Log "HOOK_BEFORE: BACKUP MOVE FAILED: $key ($_) - keeping original"
+                    # T09 安全修复：移动失败时清除不完整的副本，避免残留半份数据
+                    try { if (Test-Path -LiteralPath $destDir) { Remove-Item -LiteralPath $destDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
+                    Write-Log "HOOK_BEFORE: BACKUP MOVE FAILED: $key ($_) - partial destination removed"
                     Write-Log "HOOK_BEFORE: BACKUP OK: $key -> $srcDir (events=$($exportData.transcriptEventCount))"
-                    return @{ ExportDir = $srcDir; EventsPath = $eventsPath; AgentId = $sess.agentId }
+                    return @{ ExportDir = $srcDir; EventsPath = $eventsPath; AgentId = $sess.agentId; SourceDirToClean = $srcDir }
                 }
             }
         }
@@ -216,6 +269,7 @@ print(json.dumps({'status':'ok', 'chunks': count, 'db': db_path}))
 
 # === MAIN ===
 Write-Log "HOOK_$($Phase.ToUpper()): $SessionKey"
+Remove-ExpiredBackups
 
 if ($Phase -eq 'before') {
     # v6.8: 检查是否有近期备份（5分钟内），避免与看门狗 Invoke-Compact 重复
@@ -232,6 +286,11 @@ if ($Phase -eq 'before') {
         if ($export) {
             # Step 2: Convert to SQLite (while full trajectory is available)
             Convert-ToSqlite $SessionKey $export.EventsPath
+            # T09 安全修复：若移动失败，转换完成后清除工作区内的原始导出副本
+            if ($export.SourceDirToClean -and (Test-Path -LiteralPath $export.SourceDirToClean)) {
+                Remove-Item -LiteralPath $export.SourceDirToClean -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Log "HOOK_BEFORE: SOURCE_CLEANED: $($export.SourceDirToClean)"
+            }
         }
     }
 } elseif ($Phase -eq 'after') {

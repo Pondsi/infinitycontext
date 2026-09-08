@@ -20,7 +20,7 @@ Your support helps maintain and improve this project. Thank you! 🙏
 
 - ⭐ Star this repo — it helps others discover InfinityContext
 - 🐛 Report issues or suggest features
-- 🔀 Submit pull requests
+- 🔀 Submit patches or improvements
 - 📢 Share with friends and colleagues
 
 Thank you for your support! — Pondsi

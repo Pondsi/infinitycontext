@@ -54,13 +54,78 @@ function Get-PythonExe {
     }
     foreach ($c in $cands) {
         if ($c -and (Test-Path $c)) {
-            $t = & $c -c "print(1)" 2>$null
-            if ("$t" -match '1') { return $c }
+            $ok = $false
+            try {
+                $prevEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $t = & $c -c "print(1)" 2>$null
+                if ("$t" -match '1') { $ok = $true }
+            } catch {} finally { $ErrorActionPreference = $prevEap }
+            if ($ok) { return $c }
         }
     }
     return $null
 }
 $PyExe = Get-PythonExe
+# ===== T09 安全修复：OpenClaw CLI 可信调用器（无 cmd.exe / 无 shell 字符串拼接）=====
+# 审计要求：不得通过 cmd.exe /c 传入未校验的会话元数据。
+# 这里解析出 node.exe + openclaw.mjs 的绝对路径，以参数数组直接调用，杜绝 shell 解释。
+$script:OpenClawInvoker = $null
+$script:OpenClawInvokerResolved = $false
+
+function Resolve-OpenClawInvoker {
+    if ($script:OpenClawInvokerResolved) { return $script:OpenClawInvoker }
+    $script:OpenClawInvokerResolved = $true
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+    $candidates = New-Object System.Collections.ArrayList
+
+    $oc = Get-Command openclaw -ErrorAction SilentlyContinue
+    if ($oc -and $oc.Source) {
+        $shimDir = Split-Path $oc.Source -Parent
+        [void]$candidates.Add((Join-Path $shimDir 'node_modules\openclaw\openclaw.mjs'))
+        [void]$candidates.Add((Join-Path $shimDir '..\node_modules\openclaw\openclaw.mjs'))
+    }
+    try {
+        $npmRoot = (& npm root -g 2>$null | Out-String).Trim()
+        if ($npmRoot) { [void]$candidates.Add((Join-Path $npmRoot 'openclaw\openclaw.mjs')) }
+    } catch {}
+    [void]$candidates.Add('C:\npm-global\node_modules\openclaw\openclaw.mjs')
+
+    if ($nodeExe -and (Test-Path -LiteralPath $nodeExe)) {
+        foreach ($c in $candidates) {
+            if ($c -and (Test-Path -LiteralPath $c)) {
+                $script:OpenClawInvoker = @{ File = $nodeExe; Args = @($c) }
+                return $script:OpenClawInvoker
+            }
+        }
+    }
+    # 回退：直接使用 openclaw 命令名（仍为参数数组，无 shell 拼接）
+    if ($oc -and $oc.Source) { $script:OpenClawInvoker = @{ File = $oc.Source; Args = @() }; return $script:OpenClawInvoker }
+    return $null
+}
+
+# 严格校验会话元数据（命令注入防线）
+function Test-SafeSessionKey([string]$k) {
+    return ($k -and $k.Length -le 200 -and $k -match '^[A-Za-z0-9:_\-\.]+$')
+}
+function Test-SafeAgentId([string]$a) {
+    return ($a -and $a.Length -le 64 -and $a -match '^[A-Za-z0-9_-]+$')
+}
+
+# 直接调用 OpenClaw CLI（返回 Process 对象；失败返回 $null）
+function Start-OpenClawCli {
+    param([string[]]$CliArgs)
+    $inv = Resolve-OpenClawInvoker
+    if (-not $inv) { Write-Log 'OPENCLAW_NOT_FOUND'; return $null }
+    try {
+        return Start-Process -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs) -WindowStyle Hidden -PassThru -ErrorAction Stop
+    } catch {
+        Write-Log "OPENCLAW_SPAWN_ERR: $_"
+        return $null
+    }
+}
+# =================================================================
+
 # ===== T05 安全修复：会话枚举辅助函数（默认拒绝 / Deny by Default）=====
 # 仅查询白名单内的 Agent，绝不枚举 agents 目录、绝不回退为“全部允许”。
 function Get-SessionsJson {
@@ -183,9 +248,8 @@ function Invoke-WakeSession {
     }
 
     try {
-        $proc = Start-Process -FilePath 'openclaw' `
-            -ArgumentList @('agent', '-m', '继续', '--session-key', $SessionKey) `
-            -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+        $proc = Start-OpenClawCli -CliArgs @('agent', '-m', '继续', '--session-key', $SessionKey)
+        if (-not $proc) { Write-Log "WAKE_ERR ($Reason): $SessionKey (spawn failed)"; return $false }
         Write-Log "WAKE_SENT ($Reason): $SessionKey (pid=$($proc.Id))"
         return $true
     } catch { Write-Log "WAKE_ERR ($Reason): $SessionKey $_"; return $false }
@@ -213,6 +277,11 @@ function Invoke-Compact {
     param([string]$key, [double]$usedTokens = 0)
     # 从 session key 解析 agentId（compact 命令对 global key 要求 --agent）
     $agentId = if ($key -match '^agent:([^:]+):') { $Matches[1] } else { '' }
+    # T09 安全修复：命令注入防线——未通过校验的会话元数据一律拒绝
+    if (-not (Test-SafeSessionKey $key) -or -not (Test-SafeAgentId $agentId)) {
+        Write-Log 'COMPACT_REJECT: invalid session key or agent id'
+        return -3
+    }
     # v6.3（09-08 修复）：VBS 无控制台启动时 PS 5.1 默认 GBK 解码 stdout，openclaw UTF-8 中文 label 破坏 JSON——解析前强制 UTF-8 并重设
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     # v6.8（09-08 修复）：统一由 hook 管线（pipeline.ps1）负责备份+SQLite，Invoke-Compact 不再重复
@@ -221,7 +290,7 @@ function Invoke-Compact {
     if (Test-Path $pipelineScript) {
         try {
             $pp = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-                '-NoProfile', '-File', $pipelineScript,
+                '-NoProfile', '-NonInteractive', '-File', $pipelineScript,
                 '-SessionKey', $key, '-Phase', 'before'
             ) -WindowStyle Hidden -PassThru
             $ppDeadline = (Get-Date).AddSeconds(60)
@@ -246,7 +315,8 @@ function Invoke-Compact {
             # 每轮只保留最近 30% 的内容（--max-lines 按行数估算）
             # 估算：每轮压缩保留约 40% 的原始内容
             $keepRatio = 0.4
-            $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'openclaw', 'sessions', 'compact', $key, '--agent', $agentId, '--timeout', "$($CompressTimeoutSec * 1000)") -WindowStyle Hidden -PassThru
+            $p = Start-OpenClawCli -CliArgs @('sessions', 'compact', $key, '--agent', $agentId, '--timeout', "$($CompressTimeoutSec * 1000)")
+            if (-not $p) { Write-Log "CHUNKED_COMPACT_SPAWN_FAILED: $key round=$round"; return -3 }
             $deadline = (Get-Date).AddSeconds($CompressTimeoutSec + 20)
             while ((Get-Date) -lt $deadline) {
                 if ($p.HasExited) { break }
@@ -280,7 +350,8 @@ function Invoke-Compact {
     }
     
     # 正常压缩模式
-    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'openclaw', 'sessions', 'compact', $key, '--agent', $agentId, '--timeout', "$($CompressTimeoutSec * 1000)") -WindowStyle Hidden -PassThru
+    $p = Start-OpenClawCli -CliArgs @('sessions', 'compact', $key, '--agent', $agentId, '--timeout', "$($CompressTimeoutSec * 1000)")
+    if (-not $p) { Write-Log "COMPACT_SPAWN_FAILED: $key"; return -3 }
     $deadline = (Get-Date).AddSeconds($CompressTimeoutSec + 20)
     while ((Get-Date) -lt $deadline) {
         if ($p.HasExited) { return $p.ExitCode }

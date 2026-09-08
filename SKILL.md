@@ -1,12 +1,35 @@
 ---
-version: 1.0.0
+version: 1.1.0
 name: "infinity-context"
-description: "Universal AI agent context compression & memory optimization: never forget goals, details, or reasoning — works with OpenClaw, Claude, ChatGPT, Gemini, Dify, Ollama, and any agent platform"
+description: "Universal AI agent context compression & memory optimization: multi-layer compaction, local-only SQLite archive with FTS5 retrieval, and automatic pre-compaction trajectory backups — works with OpenClaw, Claude, ChatGPT, Gemini, Dify, Ollama, and any agent platform"
+allowed-tools: Bash, Read, Write, Env
 ---
 
 # InfinityContext - Unlimited Context Compression & Memory Optimization
 
 > Keep any model running indefinitely with multi-layer compression, automatic backup, and FTS5 search.
+
+> ⚠️ **Privacy & Data Retention Notice**
+>
+> 1. **Retention scope**: this skill does more than compress context. It also (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. Both are stored on this machine only.
+> 2. **Data minimization**: `MAX_ARCHIVE_LENGTH` truncates oversized content (head+tail kept, middle discarded) and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and email addresses. High-entropy candidates are excluded from the keyword index.
+> 3. **Local only**: no cloud sync, no telemetry, no outbound network calls. Backup directories are ACL-restricted to the current user + SYSTEM.
+> 4. **Retention**: trajectory backups are kept for 30 days by default and pruned automatically; `scripts/cleanup-old-backups.ps1` performs manual cleanup plus SQLite `VACUUM`.
+> 5. **Your control**: auto-wake is off by default (`$EnableAutoWake = $false`); the agent allowlist is deny-by-default and must be explicitly configured.
+> 6. **Background execution**: runs via OpenClaw internal hooks around compaction events; it never interrupts your current session.
+
+## Permissions
+
+Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
+
+| Capability | Used for |
+|-----------|----------|
+| Shell / process | Launching the `openclaw` CLI and PowerShell helpers (argument arrays only — no shell string interpolation) |
+| File read | Reading session trajectory JSONL and local config files |
+| File write | Writing the SQLite archive, logs, and redacted trajectory backups under `%LOCALAPPDATA%` / `%USERPROFILE%` |
+| Environment | Reading `LOCALAPPDATA`, `USERPROFILE`, and `INFINITY_CONTEXT_AGENTS` |
+
+**Not declared because not used: network, MCP.** No data leaves the machine.
 
 ## Overview
 

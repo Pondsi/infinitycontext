@@ -10,9 +10,25 @@ const os = require('os');
  * After compaction:  run enhanced summary on SQLite DB
  */
 
-const PIPELINE_SCRIPT = path.join(
+// T09 安全修复：脚本路径基于 __dirname 解析（与 handler.js 同目录），
+// 不依赖可变的 PATH 或用户目录推断；部署时 pipeline.ps1 必须与本文件同目录。
+const PIPELINE_SCRIPT = path.join(__dirname, 'pipeline.ps1');
+// 兼容旧部署：pipeline.ps1 位于 ~/.openclaw/hooks/compaction-pipeline/
+const PIPELINE_SCRIPT_FALLBACK = path.join(
     os.homedir(), '.openclaw', 'hooks', 'compaction-pipeline', 'pipeline.ps1'
 );
+
+// 信任边界校验：仅接受存在且非空的可信目录内的脚本
+function resolvePipelineScript() {
+    const fs = require('fs');
+    for (const candidate of [PIPELINE_SCRIPT, PIPELINE_SCRIPT_FALLBACK]) {
+        try {
+            const st = fs.statSync(candidate);
+            if (st.isFile() && st.size > 0) return candidate;
+        } catch (_) {}
+    }
+    return null;
+}
 
 // T06 安全修复：日志使用 LOCALAPPDATA 而非暴露 home 目录结构
 const LOG_DIR = process.env.LOCALAPPDATA
@@ -36,11 +52,18 @@ function runPipeline(sessionKey, phase) {
 
     log(`HOOK_${phase.toUpperCase()}: triggering for ${sessionKey}`);
 
+    const script = resolvePipelineScript();
+    if (!script) {
+        log(`HOOK_${phase.toUpperCase()}: pipeline.ps1 not found in trusted dir`);
+        return Promise.resolve();
+    }
+
     return new Promise((resolve) => {
         try {
             const child = spawn('powershell.exe', [
                 '-NoProfile',
-                '-File', PIPELINE_SCRIPT,
+                '-NonInteractive',
+                '-File', script,
                 '-SessionKey', sessionKey,
                 '-Phase', phase
             ], {
