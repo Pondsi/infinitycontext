@@ -144,7 +144,7 @@ function Write-Log {
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
 }
 
-# T09 安全修复：直接调用 openclaw 可执行文件 + 参数数组（不再拼接 powershell.exe -Command，杜绝命令注入）
+# T09 安全修复：直接调用 openclaw 可执行文件 + 参数数组（无 shell 介入，杜绝命令注入）
 function Invoke-WakeSession {
     param([string]$SessionKey, [string]$Reason = 'auto')
 

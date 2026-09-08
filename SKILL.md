@@ -66,7 +66,7 @@ Copy `src/handler.js`, `src/HOOK.md` **and `scripts/pipeline.ps1`** to `~/.openc
 
 Copy `src/session_to_sqlite.py` to `~/.openclaw/scripts/`.
 
-### 3. Scheduled Tasks
+### 3. Scheduling (Optional)
 
 **本插件依赖 OpenClaw 原生事件钩子运行，无需在系统中安装计划任务后台服务。**
 
