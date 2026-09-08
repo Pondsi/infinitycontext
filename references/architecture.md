@@ -52,7 +52,7 @@ disables archiving entirely — the script writes no file and returns `status: d
 |-------|---------|
 | `session_chunks` | one row per conversation chunk: `session_key`, `start_msg_id`, `end_msg_id`, `summary`, `keywords`, `anchor_questions`, `raw_content`, `created_at` |
 | `chunk_fts` | FTS5 (trigram) mirror of the searchable columns, kept in sync by an `AFTER INSERT` trigger |
-| `archive_metadata` | one row per session key (`session_key`, `format_version`); written on create and on append, and checked read-only before any append target is opened for writing |
+| `archive_metadata` | one row per session key (`session_key`, `format_version`, `app`, `archive_id`); written on create and on append, and checked read-only before any append or purge touches the file. `archive_id` is generated once per archive directory and stored in the marker, so a database copied in from elsewhere is refused |
 | indexes | `idx_session_key`, `idx_created_at`, `idx_chunk_unique (session_key, start_msg_id, end_msg_id)` |
 
 `INSERT OR IGNORE` plus the unique index makes re-importing the same transcript
@@ -68,6 +68,19 @@ upgraded on the next write). A symlink, a foreign database, a path outside `--ou
 or more than one matching candidate aborts with exit 9 before any row is touched;
 `--db-path` chooses one explicitly. Retention purging therefore can only ever run against
 the database that was identity-checked.
+
+### Exclusive creation and purge scope (T09)
+
+A new archive file is reserved with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600` before SQLite
+opens it, in append mode as well as create mode. A pre-existing file with the predicted name
+is a **collision**: the run aborts with exit 10 instead of hardening and writing into it.
+`--purge-only` enumerates only the complete artifact filename pattern
+`{key}-YYYYMMDD-HHMMSS.db`, opens each candidate **read-only** first and requires
+`archive_metadata` to carry the expected app id, a supported format version and the archive
+id from the directory marker, plus the expected `session_chunks` columns; it then re-checks
+`lstat` device and inode immediately before opening read-write. Anything that fails is
+reported as `skipped` and left untouched.
+
 
 ### Redaction and minimisation
 

@@ -369,7 +369,8 @@ def ensure_archive_marker(archive_dir):
     """在已加固的归档目录写入 owner-only 身份标记（幂等）。
 
     cleanup.py 拒绝清理没有该标记的目录，因此误把 --archive-dir 指向用户目录时
-    也不会递归删除别人的文件。
+    也不会递归删除别人的文件。v1.8.4：标记内新增随机 ``archive_id``，写入数据库的
+    ``archive_metadata`` 必须与它一致，才能执行保留期清理。
     """
     marker = os.path.join(archive_dir, MARKER_NAME)
     if os.path.exists(marker):
@@ -380,10 +381,12 @@ def ensure_archive_marker(archive_dir):
     except FileExistsError:
         return marker
     from datetime import datetime, timezone
+    import uuid
     with os.fdopen(fd, 'w', encoding='utf-8') as handle:
         json.dump({
             'app': MARKER_APP,
             'marker_version': MARKER_VERSION,
+            'archive_id': uuid.uuid4().hex,
             'created_utc': datetime.now(timezone.utc).isoformat(),
         }, handle, indent=2)
         handle.write('\n')
@@ -412,7 +415,7 @@ def verify_archive_marker(archive_dir):
         raise secure_fs.UnsafeArchiveError(f'archive marker unreadable: {exc}')
     if not isinstance(data, dict) or data.get('app') != MARKER_APP:
         raise secure_fs.UnsafeArchiveError('archive marker app id mismatch')
-    return marker
+    return data
 
 
 def purge_expired(cursor, retention_days):
@@ -439,17 +442,28 @@ def purge_expired(cursor, retention_days):
 
 
 ARCHIVE_FORMAT_VERSION = 2
+SUPPORTED_FORMAT_VERSIONS = (1, 2)
+PURGE_ARTIFACT_RE = re.compile(r'^[A-Za-z0-9_-]+-\d{8}-\d{6}\.db$')
+REQUIRED_CHUNK_COLUMNS = {
+    'chunk_id', 'session_key', 'start_msg_id', 'end_msg_id', 'summary',
+    'keywords', 'anchor_questions', 'raw_content', 'created_at',
+}
 
 
-def db_identity_ok(db_path, session_key):
-    """1.8.3：只读校验候选数据库确实属于该 session_key。
+def db_identity_ok(db_path, session_key=None, marker_id=None, require_metadata=False):
+    """只读校验候选数据库确实是本应用的归档（1.8.3/1.8.4）。
 
-    T09（v2.8）：--append 以前用 ``f.startswith(safe_key)`` 选库，``agent`` 会
-    误命中 ``agent-admin-*.db``，而且选完就直接读写。现在改为：
-      1. 文件名必须完整匹配 ``{safe_key}-YYYYMMDD-HHMMSS.db``；
-      2. 打开前先只读校验身份（archive_metadata 精确匹配，旧库回退到
-         session_chunks 内该 key 的行数 > 0）；
-      3. 身份不符或存在多个候选一律拒绝（退出码 9），绝不静默选一个。
+    T09：
+      * --append 以前用 ``f.startswith(safe_key)`` 选库，``agent`` 会误命中
+        ``agent-admin-*.db``；现在文件名必须完整匹配，并在写入前校验身份。
+      * ``--purge-only`` 以前枚举所有 ``*.db`` 并直接读写；现在只接受产物文件名，
+        且必须先只读确认 ``archive_metadata`` 的 app / format_version /
+        （若标记里有）archive_id 一致。
+
+    参数：
+      session_key      不为 None 时，要求该 key 在库内有身份记录。
+      marker_id        目录标记的 archive_id；不为空时要求与库内一致。
+      require_metadata True 时必须有合法的 archive_metadata（旧库会被跳过）。
     返回 (ok, reason)。
     """
     if os.path.islink(db_path) or not os.path.isfile(db_path):
@@ -464,13 +478,36 @@ def db_identity_ok(db_path, session_key):
             "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
         if not {'session_chunks', 'chunk_fts'}.issubset(names):
             return False, 'candidate is not an InfinityContext database'
-        if 'archive_metadata' in names:
-            row = cur.execute(
-                'SELECT COUNT(*) FROM archive_metadata WHERE session_key = ?',
-                (session_key,)).fetchone()
-            if row and row[0]:
-                return True, ''
-            return False, 'archive_metadata does not contain this session key'
+        cols = {row[1] for row in cur.execute('PRAGMA table_info(session_chunks)')}
+        if not REQUIRED_CHUNK_COLUMNS.issubset(cols):
+            return False, 'session_chunks schema mismatch'
+
+        meta_names = {'session_key', 'format_version'}
+        has_meta = 'archive_metadata' in names
+        if has_meta:
+            meta_cols = {row[1] for row in cur.execute('PRAGMA table_info(archive_metadata)')}
+            has_meta = meta_names.issubset(meta_cols)
+        if require_metadata and not has_meta:
+            return False, 'archive_metadata missing (run an append to upgrade this archive)'
+        if has_meta:
+            rows = list(cur.execute(
+                'SELECT session_key, format_version, '
+                'COALESCE(app, \'\'), COALESCE(archive_id, \'\') FROM archive_metadata'))
+            if not rows:
+                return False, 'archive_metadata is empty'
+            for key, ver, app, aid in rows:
+                if app and app != MARKER_APP:
+                    return False, f'archive_metadata app mismatch: {app!r}'
+                if ver not in SUPPORTED_FORMAT_VERSIONS:
+                    return False, f'unsupported archive format version: {ver!r}'
+                if marker_id and aid and aid != marker_id:
+                    return False, 'archive_id does not match the directory marker'
+            if session_key is not None and not any(r[0] == session_key for r in rows):
+                return False, 'archive_metadata does not contain this session key'
+            return True, ''
+
+        if require_metadata:
+            return False, 'archive_metadata missing'
         row = cur.execute(
             'SELECT COUNT(*) FROM session_chunks WHERE session_key = ?',
             (session_key,)).fetchone()
@@ -486,34 +523,56 @@ def db_identity_ok(db_path, session_key):
 def purge_only(output_dir, retention_days):
     """对归档目录内每个 InfinityContext 数据库执行一次保留期清理。
 
-    只处理：目录带标记 + 文件名以 .db 结尾 + 只读校验过 session_chunks/
-    chunk_fts 结构。第三方数据库绝不会被打开写入。
+    T09（v1.8.4）：候选必须是**完整产物文件名** ``{key}-YYYYMMDD-HHMMSS.db``，
+    且先只读通过身份校验（app / format_version / archive_id / 必需列），再
+    ``lstat`` 复核设备号与 inode 未变，最后才以读写模式打开。任何一步不通过就
+    跳过并如实上报，绝不修改。
     """
-    verify_archive_marker(output_dir)
+    marker = verify_archive_marker(output_dir)
+    marker_id = (marker or {}).get('archive_id') or None
     targets = sorted(
-        os.path.join(output_dir, name)
-        for name in os.listdir(output_dir)
-        if name.endswith('.db')
+        name for name in os.listdir(output_dir)
+        if PURGE_ARTIFACT_RE.fullmatch(name)
         and not os.path.islink(os.path.join(output_dir, name))
         and os.path.isfile(os.path.join(output_dir, name))
     )
     report = []
     total_purged = 0
-    for db_path in targets:
-        conn = sqlite3.connect(f'file:{db_path}?mode=rw', uri=True)
+    for name in targets:
+        candidate_path = os.path.join(output_dir, name)
         try:
-            cursor = conn.cursor()
-            names = {
-                row[0] for row in cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')")
-            }
-            if not {'session_chunks', 'chunk_fts'}.issubset(names):
-                report.append({'db': os.path.basename(db_path), 'skipped': 'not an infinity-context database'})
+            st_before = os.lstat(candidate_path)
+        except OSError as exc:
+            report.append({'db': name, 'skipped': f'lstat failed: {exc}'})
+            continue
+        if stat.S_ISLNK(st_before.st_mode) or not stat.S_ISREG(st_before.st_mode):
+            report.append({'db': name, 'skipped': 'not a regular file'})
+            continue
+        ok, why = db_identity_ok(candidate_path, marker_id=marker_id, require_metadata=True)
+        if not ok:
+            report.append({'db': name, 'skipped': why})
+            continue
+        try:
+            st_after = os.lstat(candidate_path)
+        except OSError as exc:
+            report.append({'db': name, 'skipped': f'lstat failed: {exc}'})
+            continue
+        if (st_before.st_dev, st_before.st_ino) != (st_after.st_dev, st_after.st_ino):
+            report.append({'db': name, 'skipped': 'file replaced between checks'})
+            continue
+        conn = sqlite3.connect(f'file:{candidate_path}?mode=rw', uri=True)
+        try:
+            st_open = os.lstat(candidate_path)
+            if (st_before.st_dev, st_before.st_ino) != (st_open.st_dev, st_open.st_ino):
+                report.append({'db': name, 'skipped': 'file replaced before opening'})
                 continue
+            cursor = conn.cursor()
             with conn:
                 purged = purge_expired(cursor, retention_days)
             total_purged += purged
-            report.append({'db': os.path.basename(db_path), 'purged_chunks': purged})
+            report.append({'db': name, 'purged_chunks': purged})
+        except (sqlite3.Error, OSError) as exc:
+            report.append({'db': name, 'skipped': f'purge failed: {exc}'})
         finally:
             conn.close()
     return {'status': 'ok', 'mode': 'purge-only', 'archive_dir': output_dir,
@@ -879,10 +938,12 @@ def main():
     # 阶段 3.5：写入归档身份标记（cleanup.py 只清理带标记的目录）
     try:
         ensure_archive_marker(output_dir)
+        marker_payload = verify_archive_marker(output_dir)
     except (OSError, secure_fs.UnsafeArchiveError) as exc:
         print(json.dumps({'status': 'error', 'mode': 'archive',
                           'error': f'cannot write archive marker: {exc}'}))
         sys.exit(3)
+    marker_id = marker_payload.get('archive_id') or None
 
     # 文件名只由已净化的 key 生成（安全字符集，不会泄漏敏感信息）
     safe_key = re.sub(r'[^a-zA-Z0-9_-]', '_', session_key)
@@ -891,6 +952,7 @@ def main():
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
 
     if append_mode:
+        reserve_exclusive = False
         # T09（v2.8）：只接受完整文件名 ``{safe_key}-YYYYMMDD-HHMMSS.db``，
         # 并在读写之前做只读身份校验；歧义或多候选一律拒绝。
         if args.db_path:
@@ -903,7 +965,7 @@ def main():
                 print(json.dumps({'status': 'error', 'mode': 'archive',
                                   'error': f'--db-path does not exist: {db_path}'}))
                 sys.exit(9)
-            ok, why = db_identity_ok(db_path, session_key)
+            ok, why = db_identity_ok(db_path, session_key, marker_id=marker_id)
             if not ok:
                 print(json.dumps({'status': 'error', 'mode': 'archive',
                                   'error': f'--db-path rejected: {why}',
@@ -924,7 +986,7 @@ def main():
                 sys.exit(9)
             if candidates:
                 candidate = os.path.join(output_dir, candidates[0])
-                ok, why = db_identity_ok(candidate, session_key)
+                ok, why = db_identity_ok(candidate, session_key, marker_id=marker_id)
                 if not ok:
                     print(json.dumps({'status': 'error', 'mode': 'archive',
                                       'error': f'append target rejected: {why}',
@@ -933,18 +995,40 @@ def main():
                 db_path = candidate
             else:
                 db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
+                reserve_exclusive = True
     else:
         if args.db_path:
             parser.error('--db-path requires --append')
         db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
+        # T09（v1.8.4）：非 append 模式必须原子独占创建；同名文件存在时拒绝，
+        # 绝不复用/修改已存在的库（即使它“看起来”是本应用的库）。
+        reserve_exclusive = True
 
     # 关键：在任何文件创建之前记录该库是否为本轮新建——决定失败时能否物理删除
-    is_new_db = not os.path.exists(db_path)
+    is_new_db = reserve_exclusive or not os.path.exists(db_path)
 
     # 阶段 4：建库 + 单事务写入（失败回滚；新建库才清理，历史库绝不动）
     conn = None
     purged_chunks = 0
     try:
+        if reserve_exclusive:
+            # T09（v1.8.4）：新建库必须原子独占创建（O_CREAT|O_EXCL|O_NOFOLLOW, 0600），
+            # 绝不复用已存在的同名文件；同名冲突直接报错，而不是去修改别人的库。
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, 'O_NOFOLLOW', 0)
+            try:
+                fd = os.open(db_path, flags, 0o600)
+                os.close(fd)
+            except FileExistsError:
+                print(json.dumps({'status': 'error', 'mode': 'archive',
+                                  'error': 'archive filename collision: this exact file already '
+                                           'exists; use --append to add to it, or retry in a '
+                                           'moment for a new timestamp',
+                                  'db_path': db_path}))
+                sys.exit(10)
+            except OSError as exc:
+                print(json.dumps({'status': 'error', 'mode': 'archive',
+                                  'error': f'cannot reserve archive file: {exc}'}))
+                sys.exit(10)
         _harden(lambda: secure_fs.secure_file(db_path), 'database-file')
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -974,9 +1058,17 @@ def main():
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS archive_metadata (
             session_key TEXT PRIMARY KEY,
-            format_version INTEGER NOT NULL
+            format_version INTEGER NOT NULL,
+            app TEXT NOT NULL DEFAULT 'infinity-context',
+            archive_id TEXT NOT NULL DEFAULT ''
         )
         ''')
+        for ddl in ('ALTER TABLE archive_metadata ADD COLUMN app TEXT NOT NULL DEFAULT "infinity-context"',
+                    'ALTER TABLE archive_metadata ADD COLUMN archive_id TEXT NOT NULL DEFAULT ""'):
+            try:
+                cursor.execute(ddl)
+            except sqlite3.Error:
+                pass
         cursor.execute('''
         CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
             chunk_id UNINDEXED,
@@ -1004,8 +1096,13 @@ def main():
         # 单事务写入：保留期清理与本次写入同属一个事务，要么全部生效，要么全部回滚
         with conn:
             cursor.execute(
-                'INSERT OR IGNORE INTO archive_metadata (session_key, format_version) VALUES (?, ?)',
-                (session_key, ARCHIVE_FORMAT_VERSION))
+                'INSERT OR IGNORE INTO archive_metadata '
+                '(session_key, format_version, app, archive_id) VALUES (?, ?, ?, ?)',
+                (session_key, ARCHIVE_FORMAT_VERSION, MARKER_APP, marker_id or ''))
+            cursor.execute(
+                'UPDATE archive_metadata SET app = ?, archive_id = ? '
+                'WHERE session_key = ? AND (app <> ? OR archive_id = ?)',
+                (MARKER_APP, marker_id or '', session_key, MARKER_APP, ''))
             purged_chunks = purge_expired(cursor, args.retention_days)
             cursor.executemany('''
                 INSERT OR IGNORE INTO session_chunks

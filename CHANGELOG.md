@@ -3,6 +3,31 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.4 — 2026-09-09
+
+Closes the two T09 findings from the ClawHub review of 1.8.3.
+
+### Fixed
+- **`--purge-only` no longer enumerates arbitrary `.db` files.** Candidates must match the
+  complete artifact filename `{key}-YYYYMMDD-HHMMSS.db`. Each candidate is opened
+  **read-only** first and must carry a valid `archive_metadata` row (app id
+  `infinity-context`, a supported format version, the `archive_id` from the directory
+  marker) and the expected `session_chunks` columns. `lstat` device and inode are re-checked
+  immediately before the read-write open. Databases that fail any check are reported as
+  `skipped` and never modified — including legacy archives without metadata.
+- **A new archive file can no longer reuse an existing file.** Create mode (and append mode
+  with no existing target) now reserves the path with `O_CREAT | O_EXCL | O_NOFOLLOW` and
+  `0600`; a pre-existing file with the predicted name aborts with exit 10 instead of being
+  hardened and written into. This closes the same-second / normalized-key collision path.
+
+### Added
+- `archive_metadata.archive_id`, generated per archive directory and stored in the marker;
+  a database copied in from another archive is refused.
+- `archive_metadata.app` and full column validation for `session_chunks`.
+- `_test_v184.py`: purge-only scope (stray file, foreign database, wrong app, wrong
+  archive id, legacy archive, symlink, tampered marker) and exclusive-create collision —
+  16 checks.
+
 ## 1.8.3 — 2026-09-09
 
 Fixes a real append-target selection bug found by the ClawHub review of 1.8.2.
