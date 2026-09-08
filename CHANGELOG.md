@@ -3,6 +3,19 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.6 — 2026-09-09
+
+Reviewer-driven fail-closed fix for the non-ASCII output path.
+
+### Fixed
+- **The non-ASCII output-directory fallback is now opt-in.** The archiver refuses to
+  move the archive when `--output-dir` cannot be encoded as ASCII (`status: error`,
+  exit 8) instead of silently switching to `~/.openclaw/sqlite-data`. Passing
+  `--allow-dir-fallback` restores the old behaviour, and the run still reports
+  `archive_dir_fallback: true` with `requested_dir` and `archive_dir` and warns on
+  stderr. The check runs before any directory or database is created, so a refused run
+  leaves nothing behind.
+
 ## 1.6.5 — 2026-09-09
 
 Reviewer-driven hardening of the 1.6.2 ingestion bounds and the filesystem guard.

@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.6.5"
+  version: "1.6.6"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -36,8 +36,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.5
-grep -q '^version: "1.6.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.6
+grep -q '^version: "1.6.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 
@@ -117,7 +117,7 @@ instead of the context window.
 - **Local only** — no network calls, no telemetry, no MCP, no cloud sync.
 - **No shell, no subprocesses** — the core never starts another program. Windows ACL hardening uses in-process Win32 security API calls, not a helper executable.
 - **Owner-only archive, fail-closed** — the archive directory is forced to `0700` and files to `0600` on POSIX; on Windows the DACL is replaced by a protected DACL granting only the current user and LOCAL SYSTEM. Every result is re-read to prove the mode took effect. New database files are created atomically with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600`, so no file ever exists with wider permissions. A symbolic link on the target path is refused. A pre-existing directory owned by another account is refused. If owner-only access cannot be enforced, archiving **aborts and the half-written database is destroyed** (`status: error`, exit 3) instead of storing readable data; `--allow-insecure-storage` is the only way to opt out, and the JSON result then reports `insecure_storage: true`.
-- **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. Rules are validated and **precompiled at startup**: a malformed `redact_rules.json`, a wrong field type or an uncompilable regex aborts the run before any database is created, and a failure while applying a rule aborts instead of skipping it. `session_key` is sanitised **before** it is used for any path or filename — a value outside the safe identifier format (or one that itself looks sensitive) becomes an opaque hash, so it never reaches a filename, the table or the FTS index. The transcript is redacted entirely in memory, then written in a single transaction; on failure the transaction rolls back and only a database created by that same run is removed — an existing archive being appended to is never deleted. High-entropy candidates are excluded from the keyword index. In-place redaction (`--redact-file`) additionally **requires `--allow-dir`** and resolves every symbolic link before comparing paths: the lexical path, the resolved path and the resolved allowed directory must all agree, so a symlinked ancestor inside the allowed directory cannot redirect the write elsewhere. If a non-ASCII output path forces the archive into the fallback directory, the run prints a warning and reports `archive_dir_fallback: true` together with `requested_dir` and `archive_dir` — the location is never changed silently.
+- **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. Rules are validated and **precompiled at startup**: a malformed `redact_rules.json`, a wrong field type or an uncompilable regex aborts the run before any database is created, and a failure while applying a rule aborts instead of skipping it. `session_key` is sanitised **before** it is used for any path or filename — a value outside the safe identifier format (or one that itself looks sensitive) becomes an opaque hash, so it never reaches a filename, the table or the FTS index. The transcript is redacted entirely in memory, then written in a single transaction; on failure the transaction rolls back and only a database created by that same run is removed — an existing archive being appended to is never deleted. High-entropy candidates are excluded from the keyword index. In-place redaction (`--redact-file`) additionally **requires `--allow-dir`** and resolves every symbolic link before comparing paths: the lexical path, the resolved path and the resolved allowed directory must all agree, so a symlinked ancestor inside the allowed directory cannot redirect the write elsewhere. A non-ASCII output path is **refused** by default (exit 8); only an explicit `--allow-dir-fallback` moves the archive to the ASCII fallback directory, and the run then prints a warning and reports `archive_dir_fallback: true` together with `requested_dir` and `archive_dir` — the location is never changed silently.
 - **Data minimisation** — `MAX_ARCHIVE_LENGTH` truncates oversized content (head + tail kept) before storage. Ingestion itself is bounded **before** parsing: at most `--max-session-bytes` (64 MiB) is read from the head of the transcript, a line longer than `--max-line-bytes` (1 MiB) is discarded before JSON or any regex sees it, and ingestion stops at `--max-messages` (200000) or `--max-total-chars` (64 MiB). The result reports `ingest.truncated` and `ingest.truncated_reason`, so a bounded archive is never presented as a complete one. In-place redaction refuses a file larger than 64 MiB before reading it.
 - **Deny-by-default filesystem rules** — `cleanup.py` only deletes files inside the canonical archive directory, only with whitelisted extensions, never through a symbolic link, and never without `--apply`.
 
@@ -147,6 +147,7 @@ pinned revision and checksums.
 | Setting | Default | Where |
 |---------|---------|-------|
 | archive directory | `~/.infinity-context/archive` | `--output-dir` / `--archive-dir`, or `INFINITY_CONTEXT_HOME` |
+| non-ASCII output path | refused (exit 8) | `--allow-dir-fallback` opts into `~/.openclaw/sqlite-data` |
 | `MAX_ARCHIVE_LENGTH` | `20000` characters | `scripts/session_to_sqlite.py` |
 | ingest file cap | 64 MiB (hard ceiling) | `--max-session-bytes` (1..ceiling) |
 | ingest line cap | 1 MiB (hard ceiling) | `--max-line-bytes` (1..ceiling) |
@@ -197,8 +198,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills  # OpenClaw �
 # 方式二：源码（固定已审计 tag + 逐文件校验，禁止使用可变分支）
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.5
-grep -q '^version: "1.6.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.6
+grep -q '^version: "1.6.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS：shasum -a 256 -c checksums.txt
 mkdir -p ~/.agents/skills/infinity-context/scripts
 mkdir -p ~/.agents/skills/infinity-context/references

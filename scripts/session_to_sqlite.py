@@ -550,6 +550,9 @@ def main():
                         help='maximum number of messages ingested (default 200000)')
     parser.add_argument('--max-total-chars', type=int, default=MAX_TOTAL_CHARS,
                         help='maximum cumulative content characters (default 64 MiB)')
+    parser.add_argument('--allow-dir-fallback', action='store_true', default=False,
+                        help='DANGEROUS: if --output-dir is not ASCII-safe, archive into '
+                             '~/.openclaw/sqlite-data instead of aborting.')
     parser.add_argument('--allow-insecure-storage', action='store_true', default=False,
                         help='DANGEROUS: keep archiving even if owner-only permissions '
                              'cannot be enforced. Only for trusted single-user filesystems.')
@@ -610,6 +613,25 @@ def main():
     requested_dir = output_dir
     archive_dir_fallback = False
 
+    # 阶段 2.5：输出目录必须能安全交给 sqlite3（Windows 下非 ASCII 路径不可用）。
+    # Fail-Closed：默认直接拒绝改道，只有显式 --allow-dir-fallback 才回退到
+    # ASCII 目录，并在 stderr 与 JSON 结果中如实标注。
+    try:
+        output_dir.encode('ascii')
+    except UnicodeEncodeError:
+        if not args.allow_dir_fallback:
+            print(json.dumps({
+                'status': 'error', 'mode': 'archive',
+                'error': 'output directory is not ASCII-safe; pass an ASCII path or '
+                         'rerun with --allow-dir-fallback to use the fallback directory',
+                'requested_dir': requested_dir,
+            }))
+            sys.exit(8)
+        output_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sqlite-data')
+        archive_dir_fallback = True
+        print(f"SECURITY_WARN: ARCHIVE_DIR_FALLBACK requested={requested_dir} "
+              f"effective={output_dir} reason=non-ascii-path", file=sys.stderr)
+
     # 阶段 2：读取轨迹并在内存中完成全量脱敏（此时尚未创建任何数据库文件）
     try:
         messages, ingest = read_messages(
@@ -647,26 +669,6 @@ def main():
 
     # 文件名只由已净化的 key 生成（安全字符集，不会泄漏敏感信息）
     safe_key = re.sub(r'[^a-zA-Z0-9_-]', '_', session_key)
-
-    # Use ASCII-safe path for SQLite (avoid Chinese characters in path)
-    # Python sqlite3 has issues with non-ASCII paths on Windows
-    # 若因非 ASCII 回退到其它目录，必须显式告警 + 在结果中如实标注（绝不静默改道）
-    try:
-        output_dir.encode('ascii')
-    except UnicodeEncodeError:
-        # Path contains non-ASCII, use fallback
-        ascii_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sqlite-data')
-        try:
-            ascii_ok = _harden(
-                lambda: secure_fs.secure_directory(ascii_dir), 'archive-directory-fallback')
-        except secure_fs.UnsafeArchiveError as exc:
-            print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
-            sys.exit(3)
-        permissions_enforced = bool(permissions_enforced and ascii_ok)
-        print(f"SECURITY_WARN: ARCHIVE_DIR_FALLBACK requested={requested_dir} "
-              f"effective={ascii_dir} reason=non-ascii-path", file=sys.stderr)
-        archive_dir_fallback = True
-        output_dir = ascii_dir
 
     from datetime import datetime
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
