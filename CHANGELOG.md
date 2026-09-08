@@ -3,6 +3,21 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.2.1 — 2026-09-09
+
+Registry-compliance release. ClawHub's static analysis rejects any package containing
+self-executing JavaScript (`suspicious.dangerous_exec` on `child_process`), and there is
+no suppression mechanism. The published package therefore ships **no `.js` files**.
+
+### Changed
+- The optional OpenClaw compaction hook (`src/handler.js`, `src/HOOK.md`,
+  `src/integrity.json`) is now distributed **in the GitHub repository only**; it is not
+  part of the registry package. `README.md`, `SKILL.md` and `说明.md` state this
+  explicitly.
+- Everything in the registry package runs as scripts the agent invokes through its
+  declared tools — no hidden execution path.
+- Verification extended to 3 rounds / 192 checks against the installed copy.
+
 ## 1.2.0 — 2026-09-09
 
 Security & compliance hardening round (external audit findings).

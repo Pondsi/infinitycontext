@@ -1,5 +1,5 @@
 ---
-version: 1.2.0
+version: 1.2.1
 name: "infinity-context"
 description: "Universal context compression & memory optimization for any Agent Skills host - DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama and more. Multi-layer compaction, local-only SQLite archive with FTS5 retrieval, automatic pre-compaction trajectory backups, and an optional opt-in auto-recovery that can resume a stalled session. Runs fully offline: no network, no MCP, no telemetry."
 license: MIT
@@ -7,7 +7,7 @@ compatibility: "Any host that loads standard SKILL.md / Agent Skills: DeepSeek H
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.2.0"
+  version: "1.2.1"
   license: "MIT"
 ---
 
@@ -53,6 +53,8 @@ InfinityContext is a standard **Agent Skills** skill (`SKILL.md`), so any host t
 | **Cursor / Dify / Ollama / custom agents** | point the agent at this folder | The Python engine runs standalone |
 
 The **portable core** (redaction engine + SQLite/FTS5 archive) is plain Python 3.9+ and runs anywhere. The **optional watchdog** (`main-session-monitor.ps1`) and the **compaction hook** (`handler.js` + `pipeline.ps1`) are Windows/OpenClaw integrations; hosts without them still get the compression guidance, the archive, and FTS5 retrieval.
+
+> **Registry package note**: ClawHub (and similar registries) reject packages that contain self-executing JavaScript. This package therefore ships **no `.js` files**: the optional OpenClaw compaction hook (`src/handler.js`, `src/HOOK.md`, `src/integrity.json`) is distributed in the **GitHub repository only**. Everything in this package runs as scripts that the agent invokes through its declared tools.
 
 ## Overview
 
@@ -120,7 +122,7 @@ Copy files from `scripts/` to `~/.openclaw/scripts/` (pipeline.ps1 also needs to
 - `pipeline.ps1` — Hook pipeline (backup + SQLite + summary)
 - `session-to-sqlite.ps1` — JSONL → SQLite wrapper
 
-Copy `src/handler.js`, `src/HOOK.md`, `src/integrity.json` **and `scripts/pipeline.ps1`** to `~/.openclaw/hooks/compaction-pipeline/` (the hook executes `pipeline.ps1` from this directory).
+Copy `src/handler.js`, `src/HOOK.md`, `src/integrity.json` **and `scripts/pipeline.ps1`** to `~/.openclaw/hooks/compaction-pipeline/` (the hook executes `pipeline.ps1` from this directory). The `src/` files come from the **GitHub repository** — registry packages omit them, as noted above.
 
 After editing `pipeline.ps1`, regenerate the manifest so the hook keeps running:
 

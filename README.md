@@ -25,6 +25,10 @@ Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
 
 **Not declared because not used: network, MCP.** No data leaves the machine.
 
+> **Registry package note**: ClawHub and similar registries reject packages that contain self-executing JavaScript, so this package ships **no `.js` files**. The optional OpenClaw compaction hook (`src/handler.js`, `src/HOOK.md`, `src/integrity.json`) is distributed in the **GitHub repository only**. Everything in this package runs as scripts that the agent invokes through its declared tools.
+
+When you install that hook from the GitHub repository, it launches exactly one subprocess: `pipeline.ps1`, resolved from the hook's own directory (never from `PATH`), verified against `integrity.json` (SHA-256) before execution, and run through the absolute `System32` path of `powershell.exe` with an argument array. No shell, no string interpolation, no `-Command`.
+
 ## English
 
 ### What is this?
