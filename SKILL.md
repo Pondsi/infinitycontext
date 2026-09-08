@@ -57,28 +57,20 @@ Add to `openclaw.json`:
 
 ### 2. Deploy Scripts
 
-Copy files from `scripts/` to `~/.openclaw/scripts/`:
+Copy files from `scripts/` to `~/.openclaw/scripts/` (pipeline.ps1 also needs to live next to the hook — see below):
 - `main-session-monitor.ps1` — Watchdog (v6.8)
 - `pipeline.ps1` — Hook pipeline (backup + SQLite + summary)
 - `session-to-sqlite.ps1` — JSONL → SQLite wrapper
 
-Copy `src/handler.js` and `src/HOOK.md` to `~/.openclaw/hooks/compaction-pipeline/`.
+Copy `src/handler.js`, `src/HOOK.md` **and `scripts/pipeline.ps1`** to `~/.openclaw/hooks/compaction-pipeline/` (the hook executes `pipeline.ps1` from this directory).
 
 Copy `src/session_to_sqlite.py` to `~/.openclaw/scripts/`.
 
-### 3. Create Scheduled Tasks
+### 3. Scheduled Tasks
 
-```powershell
-# Watchdog: every 10 minutes
-schtasks /Create /TN "OpenClaw-MainSessionMonitor" /TR `
-  "powershell.exe -NoProfile -File `"scripts\main-session-monitor.ps1`" -AutoCompact" `
-  /SC MINUTE /MO 10 /RL LIMITED /F
+**本插件依赖 OpenClaw 原生事件钩子运行，无需在系统中安装计划任务后台服务。**
 
-# Backup cleanup: every 7 days
-schtasks /Create /TN "OpenClaw-CleanupOldBackups" /TR `
-  "powershell.exe -NoProfile -File `"scripts\cleanup-old-backups.ps1`"" `
-  /SC DAILY /MO 7 /ST 03:00 /RL LIMITED /F
-```
+可选：如需看门狗定期检查（非必需），请使用 OpenClaw 自带的调度能力（`automations`），
 
 ### 4. Restart Gateway
 

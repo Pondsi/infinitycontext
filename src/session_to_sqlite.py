@@ -11,6 +11,22 @@ import os
 import re
 import argparse
 
+
+# T09 安全修复：入库前敏感信息脱敏，防止 API Key / Token / 密码被明文永久保存
+def redact_sensitive_info(text):
+    """遮蔽常见敏感凭据格式（API Key、Bearer Token、密码字段）"""
+    if not text:
+        return text
+    # 1. OpenAI 风格 API Key (sk-xxxx)
+    text = re.sub(r'(sk-[a-zA-Z0-9]{20,})', r'sk-[REDACTED]', text)
+    # 2. GitHub Token (ghp_/gho_/ghu_/ghs_/ghr_)
+    text = re.sub(r'(gh[pousr]_[a-zA-Z0-9]{20,})', r'gh*_[REDACTED]', text)
+    # 3. Bearer Token
+    text = re.sub(r'(Bearer\s+)[a-zA-Z0-9\-\._~\+/]+=*', r'\1[REDACTED]', text)
+    # 4. 常见密码/密钥字段 (password=xxx, secret: xxx, pwd xxx)
+    text = re.sub(r'(?i)(password|secret|pwd|api_key|apikey)["\'\s:=]+([^\s,;\}]+)', r'\1=[REDACTED]', text)
+    return text
+
 def main():
     parser = argparse.ArgumentParser(description='Convert session JSONL to SQLite with FTS5')
     parser.add_argument('--session-key', required=True, help='Session key')
@@ -224,6 +240,7 @@ def main():
 
         # Full original content (no truncation)
         raw_content = '\n'.join([f"[{msg['role']}] {msg['content']}" for msg in chunk])
+        raw_content = redact_sensitive_info(raw_content)  # T09 安全修复：入库前脱敏
 
         cursor.execute('''
             INSERT OR IGNORE INTO session_chunks (session_key, start_msg_id, end_msg_id, summary, keywords, anchor_questions, raw_content)

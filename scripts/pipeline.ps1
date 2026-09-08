@@ -8,7 +8,34 @@ param(
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Continue'
+# ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
+function Get-PythonExe {
+    $cands = New-Object System.Collections.ArrayList
+    foreach ($n in @('python3','python','py')) {
+        $cmd = Get-Command $n -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
+    }
+    foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
+        Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
+    }
+    foreach ($root in @('HKLM:\SOFTWARE\Python\PythonCore','HKCU:\SOFTWARE\Python\PythonCore')) {
+        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+            $ip = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction SilentlyContinue).'(default)'
+            if ($ip) { [void]$cands.Add((Join-Path $ip 'python.exe')) }
+        }
+    }
+    foreach ($c in $cands) {
+        if ($c -and (Test-Path $c)) {
+            $t = & $c -c "print(1)" 2>$null
+            if ("$t" -match '1') { return $c }
+        }
+    }
+    return $null
+}
+$PyExe = Get-PythonExe
+# =================================================================
+
 
 $ScriptDir = $PSScriptRoot
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\trajectory-exports"
@@ -64,7 +91,7 @@ function Convert-ToSqlite($key, $eventsPath) {
         }
         $sqliteOutFile = [System.IO.Path]::GetTempFileName()
         $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $sqliteScript,
+            '-NoProfile', '-File', $sqliteScript,
             '-SessionKey', $key, '-SessionFile', $eventsPath,
             '-OutputDir', $SqliteDir, '-AppendMode'
         ) -WindowStyle Hidden -PassThru -RedirectStandardOutput $sqliteOutFile -RedirectStandardError "${sqliteOutFile}.err"
@@ -115,7 +142,7 @@ conn.close()
 print(json.dumps({'status':'ok', 'chunks': count, 'db': db_path}))
 "@ | Out-File -FilePath $pyFile -Encoding UTF8 -Force
 
-        $result = & "python" $pyFile $dbs.FullName $key 2>&1 | Out-String
+        $result = & $PyExe $pyFile $dbs.FullName $key 2>&1 | Out-String
         Remove-Item $pyFile -Force -ErrorAction SilentlyContinue
         Write-Log "HOOK_AFTER: SUMMARY: $key -> $($result.Trim())"
     } catch {

@@ -35,7 +35,34 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'SilentlyContinue'
-$ProgressPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+# ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
+function Get-PythonExe {
+    $cands = New-Object System.Collections.ArrayList
+    foreach ($n in @('python3','python','py')) {
+        $cmd = Get-Command $n -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
+    }
+    foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
+        Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
+    }
+    foreach ($root in @('HKLM:\SOFTWARE\Python\PythonCore','HKCU:\SOFTWARE\Python\PythonCore')) {
+        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+            $ip = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction SilentlyContinue).'(default)'
+            if ($ip) { [void]$cands.Add((Join-Path $ip 'python.exe')) }
+        }
+    }
+    foreach ($c in $cands) {
+        if ($c -and (Test-Path $c)) {
+            $t = & $c -c "print(1)" 2>$null
+            if ("$t" -match '1') { return $c }
+        }
+    }
+    return $null
+}
+$PyExe = Get-PythonExe
+# =================================================================
+
 
 $ThresholdPct = 35.0          # 主人 09-08 指令：35% 就压缩（原 49%），更早介入防溢出
 $ThresholdAbsTokens = 60000    # 主人 09-08 指令：绝对值门槛 60000 tokens（防空转）
@@ -45,7 +72,16 @@ $WakeCooldownMin = 30          # v5.5：同一会话失败唤醒冷却（分钟�
 $WakeIdleMin = 4               # v5.5：会话尾部无新写入超过此分钟数才判定失败（防误判进行中）
 $StickyLimit = 5              # 连续失败 5 次 → 暂停该会话自动重试 30 分钟
 $StickyPauseMin = 30          # sticky 暂停时长（分钟）
-$EmergencyPct = 100.0         # 超过窗口 100% = 紧急态：不暂停，每轮必试压缩
+$EmergencyPct = 100.0         # 超过窗口 100% = 紧急态：不暂停，每轮必试压缩
+# ===== T05 安全合规配置（最小权限原则）=====
+# 仅处理白名单内的 Agent 会话（留空 = 不限制，但强烈建议显式指定）
+# 示例：$AllowedAgents = @('main', 'yai')
+$AllowedAgents = @()
+
+# 是否允许脚本自主唤醒中断的会话（默认关闭，需用户显式授权 Opt-in）
+$EnableAutoWake = $false
+# ==========================================
+
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\sessions"   # 压缩前 transcript 备份
 $LockFile = "$env:USERPROFILE\.openclaw\main-session-monitor.lock"
 $LogFile = "$env:LOCALAPPDATA\.openclaw\logs\main-session-monitor.log"
@@ -75,13 +111,26 @@ function Write-Log {
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
 }
 
-# v6.1 UTF-8 安全唤醒函数（修复 cmd.exe GBK 编码导致中文变乱码 "缁х画"）
+# T09 安全修复：直接调用 openclaw 可执行文件 + 参数数组（不再拼接 powershell.exe -Command，杜绝命令注入）
 function Invoke-WakeSession {
     param([string]$SessionKey, [string]$Reason = 'auto')
+
+    # T05 安全修复：自动唤醒默认关闭，需用户显式授权（Opt-in / 最小权限原则）
+    if (-not $EnableAutoWake) {
+        Write-Log "WAKE_SKIP ($Reason): $SessionKey（EnableAutoWake 未开启，跳过自主唤醒）"
+        return $false
+    }
+
+    # T09 安全修复：严格白名单校验 SessionKey 格式，阻断注入
+    if ($SessionKey -notmatch '^[A-Za-z0-9:_\-\.]+$') {
+        Write-Log "WAKE_REJECT ($Reason): invalid session key format"
+        return $false
+    }
+
     try {
-        $encodedMsg = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes('继续'))
-        # 用 PowerShell 直接执行 openclaw，避免 cmd.exe GBK 编码
-        $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "`$env:PYTHONIOENCODING='utf-8'; openclaw agent -m ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedMsg'))) --session-key '$SessionKey'") -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+        $proc = Start-Process -FilePath 'openclaw' `
+            -ArgumentList @('agent', '-m', '继续', '--session-key', $SessionKey) `
+            -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
         Write-Log "WAKE_SENT ($Reason): $SessionKey (pid=$($proc.Id))"
         return $true
     } catch { Write-Log "WAKE_ERR ($Reason): $SessionKey $_"; return $false }
@@ -115,7 +164,7 @@ function Invoke-Compact {
     if (Test-Path $pipelineScript) {
         try {
             Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $pipelineScript,
+                '-NoProfile', '-File', $pipelineScript,
                 '-SessionKey', $key, '-Phase', 'before'
             ) -WindowStyle Hidden -Wait -TimeoutSec 60 | Out-Null
             Write-Log "PIPELINE_BEFORE: $key (hook pipeline)"
@@ -371,7 +420,13 @@ try {
     foreach ($s in $sessions) {
         $key = [string]$s.key
         if ($key -match 'weixin|wechat') { continue }
-        if ([string]$s.status -eq 'killed') { continue }
+        if ([string]$s.status -eq 'killed') { continue }
+        # T05 安全修复：白名单拦截——仅处理授权 Agent 的会话，禁止越权跨 Agent 操作
+        if ($AllowedAgents.Count -gt 0) {
+            $agentId = [string]$s.agentId
+            if ($agentId -notin $AllowedAgents) { continue }
+        }
+
         # v5.8：所有代理的会话都压缩，不再限制 kind
         # 移除旧限制：if ($s.kind -ne 'direct') { continue }
         # 移除旧限制：if ($key -notmatch 'dashboard|(^agent:(main|yai):main$)') { continue }
@@ -399,7 +454,7 @@ try {
                         #   没有 = 网关在生成过程中崩溃，jsonl 被截断
                         $crashDetected = $false
                         try {
-                            $crashProbe = & "python" -c "
+                            $crashProbe = & $PyExe -c "
 import json, sys
 p = sys.argv[1]
 with open(p, encoding='utf-8') as f:
@@ -434,7 +489,7 @@ print('NO_ASSISTANT')
 
                         # ★v5.5 原有逻辑：toolResult 后无文本回复
                         if (-not $wakeOk) {
-                            $tailProbe = & "python" -c "
+                            $tailProbe = & $PyExe -c "
 import json,sys
 p = sys.argv[1]
 with open(p, encoding='utf-8') as f:
@@ -593,11 +648,10 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                     }
                     if (Test-Path $sqlitePath) {
                         # 使用 Python 查询 SQLite，获取消息 ID 范围
-                        $pythonExe = "python"
-                        if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
+                        $pythonExe = $PyExe
                         
                         # T09 安全修复：使用临时 .py 文件 + 命令行参数，避免字符串插值注入
-                        $pyQueryFile = Join-Path $env:TEMP "oc_qc_fa0d2d23.py"
+                        $pyQueryFile = Join-Path $env:TEMP ("oc_qc_" + [guid]::NewGuid().ToString("N").Substring(0,8) + ".py")
                         @'
 import sqlite3, json, sys
 db_path = sys.argv[1]
@@ -650,7 +704,7 @@ print(json.dumps(result, ensure_ascii=False))
                             
                             # 用 Python 查询 SQLite 获取现有 chunks 构建 Navigation Map
                             # T09 安全修复：使用临时 .py 文件 + 命令行参数
-                            $pyNavFile = Join-Path $env:TEMP "oc_nm_0c4a4c52.py"
+                            $pyNavFile = Join-Path $env:TEMP ("oc_nm_" + [guid]::NewGuid().ToString("N").Substring(0,8) + ".py")
                             @'
 import sqlite3, json, sys
 db_path = sys.argv[1]
@@ -864,8 +918,8 @@ print(json.dumps(result, ensure_ascii=False))
                             if (-not $wakeOk) {
                                 Write-Log "WAKE_FAILED_ALL: $key（3 次唤醒均未恢复，发送警告音）"
                                 try {
-                                    $notifyArgs = @('//nologo', $env:LOCALAPPDATA\.openclaw\scripts\RunHidden.vbs, 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "压缩后唤醒失败: $key")
-                                    Start-Process -FilePath 'wscript.exe' -ArgumentList $notifyArgs -WindowStyle Hidden -ErrorAction SilentlyContinue
+                                    $notifyArgs = @('-NoProfile', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "压缩后唤醒失败: $key")
+                                    Start-Process -FilePath 'powershell.exe' -ArgumentList $notifyArgs -WindowStyle Hidden -ErrorAction SilentlyContinue
                                 } catch {}
                             }
                         }
@@ -897,8 +951,8 @@ print(json.dumps(result, ensure_ascii=False))
                             if (-not $wakeOk2) {
                                 Write-Log "WAKE_FAILED_ALL: $key（轮换后 3 次唤醒均未恢复，发送警告音）"
                                 try {
-                                    $notifyArgs2 = @('//nologo', $env:LOCALAPPDATA\.openclaw\scripts\RunHidden.vbs, 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "轮换后唤醒失败: $key")
-                                    Start-Process -FilePath 'wscript.exe' -ArgumentList $notifyArgs2 -WindowStyle Hidden -ErrorAction SilentlyContinue
+                                    $notifyArgs2 = @('-NoProfile', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "轮换后唤醒失败: $key")
+                                    Start-Process -FilePath 'powershell.exe' -ArgumentList $notifyArgs2 -WindowStyle Hidden -ErrorAction SilentlyContinue
                                 } catch {}
                             }
                         }

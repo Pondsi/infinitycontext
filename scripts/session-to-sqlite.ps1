@@ -11,10 +11,36 @@ param(
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
+# ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
+function Get-PythonExe {
+    $cands = New-Object System.Collections.ArrayList
+    foreach ($n in @('python3','python','py')) {
+        $cmd = Get-Command $n -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
+    }
+    foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
+        Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
+    }
+    foreach ($root in @('HKLM:\SOFTWARE\Python\PythonCore','HKCU:\SOFTWARE\Python\PythonCore')) {
+        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+            $ip = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction SilentlyContinue).'(default)'
+            if ($ip) { [void]$cands.Add((Join-Path $ip 'python.exe')) }
+        }
+    }
+    foreach ($c in $cands) {
+        if ($c -and (Test-Path $c)) {
+            $t = & $c -c "print(1)" 2>$null
+            if ("$t" -match '1') { return $c }
+        }
+    }
+    return $null
+}
+$PyExe = Get-PythonExe
+# =================================================================
 
-$pythonExe = "python"
-if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
+
+$pythonExe = $PyExe
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pyScript = Join-Path $scriptDir "session_to_sqlite.py"

@@ -347,4 +347,12 @@ openclaw gateway restart
 
 Лицензия MIT
 
+## 隐私声明 / Privacy Statement
 
+本 Skill 会将对话上下文保存在本地纯内网的 SQLite 中以供检索，系统已内置正则脱敏机制屏蔽常见 API 密钥，且不依赖任何云端同步。所有数据仅存储于本机，不会外传。
+
+This skill stores conversation context in a local-only SQLite database for retrieval. Built-in regex redaction masks common API keys. No cloud sync is used; all data stays on the local machine.
+
+---
+
+Pondsi (+MiMo-v2.5/v2.5pro+deepseek-v4-flash/pro+/deepseek-v4.1-flash-expires-on-0910+GLM5.3-flash+Gemini3.1-pro+Qwen3.8-27b) — automatically committed by Openclaw
