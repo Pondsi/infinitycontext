@@ -1,4 +1,4 @@
----
+﻿---
 name: "infinity-context"
 description: "OpenClaw上下文压缩与记忆优化：防小模型溢出、看门狗自动压缩、SQLite检索、MEMORY精简"
 ---
@@ -364,3 +364,4 @@ MIT-Lizenz — siehe [LICENSE](LICENSE).
 ## Лицензия
 
 Лицензия MIT — см. [LICENSE](LICENSE).
+

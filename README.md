@@ -1,6 +1,6 @@
-# InfinityContext
+﻿# InfinityContext
 
-**Open-Source Context Compression & Memory Optimization for OpenClaw**
+**Open-Source Context Compression & Memory Optimization for AI Agents**
 
 [English](#english) | [简体中文](#简体中文) | [繁體中文](#繁體中文) | [日本語](#日本語) | [한국어](#한국어) | [Español](#español) | [Português](#português) | [Français](#français) | [Deutsch](#deutsch) | [Русский](#русский)
 
@@ -10,7 +10,7 @@
 
 ### What is this?
 
-InfinityContext is an OpenClaw Skill that prevents context overflow in small models (128K context). It provides multi-layer compression, automatic backup, and FTS5 search to keep conversations running indefinitely.
+InfinityContext is an AI Agent Skill that prevents context overflow in small models (128K context). It provides multi-layer compression, automatic backup, and FTS5 search to keep conversations running indefinitely.
 
 ### Features
 
@@ -24,7 +24,7 @@ InfinityContext is an OpenClaw Skill that prevents context overflow in small mod
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 
 # 2. Copy scripts to OpenClaw
 cp scripts/* ~/.openclaw/scripts/
@@ -53,6 +53,10 @@ Deduplication: skip if backup exists within 5 minutes
 - PowerShell 5.1+ (Windows)
 - Python 3.x (for SQLite conversion)
 
+### Sponsors
+
+If you find this project helpful, consider supporting its development! See [SPONSORS.md](SPONSORS.md) for donation options.
+
 ### License
 
 MIT License
@@ -63,7 +67,7 @@ MIT License
 
 ### 这是什么？
 
-InfinityContext 是一个 OpenClaw Skill，解决小模型（128K 上下文）对话中上下文溢出的问题。通过多层压缩机制，让任何大小的模型都能持续对话而不中断。
+InfinityContext 是一个 AI Agent Skill，解决小模型（128K 上下文）对话中上下文溢出的问题。通过多层压缩机制，让任何大小的模型都能持续对话而不中断。
 
 ### 功能特性
 
@@ -77,7 +81,7 @@ InfinityContext 是一个 OpenClaw Skill，解决小模型（128K 上下文）�
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 
 # 2. 复制脚本到 OpenClaw
 cp scripts/* ~/.openclaw/scripts/
@@ -116,7 +120,7 @@ MIT 许可证
 
 ### 這是什麼？
 
-InfinityContext 是一個 OpenClaw Skill，解決小模型（128K 上下文）對話中上下文溢出的問題。透過多層壓縮機制，讓任何大小的模型都能持續對話而不中斷。
+InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）對話中上下文溢出的問題。透過多層壓縮機制，讓任何大小的模型都能持續對話而不中斷。
 
 ### 功能特性
 
@@ -129,7 +133,7 @@ InfinityContext 是一個 OpenClaw Skill，解決小模型（128K 上下文）�
 ### 快速開始
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -145,7 +149,7 @@ MIT 許可證
 
 ### これは何？
 
-InfinityContext は、小規模モデル（128K コンテキスト）のコンテキストオーバーフローを防止する OpenClaw Skill です。多層圧縮、自動バックアップ、FTS5 検索で会話を途切れなく維持します。
+InfinityContext は、小規模モデル（128K コンテキスト）のコンテキストオーバーフローを防止する AI Agent Skill です。多層圧縮、自動バックアップ、FTS5 検索で会話を途切れなく維持します。
 
 ### 機能
 
@@ -157,7 +161,7 @@ InfinityContext は、小規模モデル（128K コンテキスト）のコン�
 ### クイックスタート
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -173,7 +177,7 @@ MIT ラ이センス
 
 ### 이것은 무엇인가?
 
-InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플로우를 방지하는 OpenClaw Skill입니다. 다층 압축, 자동 백업, FTS5 검색으로 대화를 끊김 없이 유지합니다.
+InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플로우를 방지하는 AI Agent Skill입니다. 다층 압축, 자동 백업, FTS5 검색으로 대화를 끊김 없이 유지합니다.
 
 ### 기능
 
@@ -185,7 +189,7 @@ InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플
 ### 빠른 시작
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -213,7 +217,7 @@ InfinityContext es un Skill de OpenClaw que previene el desbordamiento de contex
 ### Inicio Rápido
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -241,7 +245,7 @@ InfinityContext é um Skill do OpenClaw que previne o transbordamento de context
 ### Início Rápido
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -269,7 +273,7 @@ InfinityContext est un Skill OpenClaw qui empêche le débordement de contexte d
 ### Démarrage Rapide
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -297,7 +301,7 @@ InfinityContext ist ein OpenClaw-Skill, der Kontext-Überlauf in kleinen Modelle
 ### Schnellstart
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -325,7 +329,7 @@ InfinityContext — это навык OpenClaw, предотвращающий �
 ### Быстрый старт
 
 ```bash
-git clone https://github.com/Pondsi/openclaw-infinity-context.git
+git clone https://github.com/Pondsi/infinitycontext.git
 cp scripts/* ~/.openclaw/scripts/
 cp src/* ~/.openclaw/hooks/compaction-pipeline/
 openclaw gateway restart
@@ -334,3 +338,5 @@ openclaw gateway restart
 ### Лицензия
 
 Лицензия MIT
+
+
