@@ -6,7 +6,7 @@ param(
     [string]$SessionKey,
     [Parameter(Mandatory=$true)]
     [string]$SessionFile,
-    [string]$OutputDir = "$env:USERPROFILE\.openclaw\压缩会话临时文件",
+    [string]$OutputDir = "$env:USERPROFILE\.openclaw\sqlite-data",
     [switch]$AppendMode
 )
 

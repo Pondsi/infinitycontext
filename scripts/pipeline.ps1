@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$SessionKey,
     [Parameter(Mandatory=$true)]
-    [string]$Phase  # "before" or "after"
+    [string]$Phase,  # "before" or "after"
+    [string]$AgentId = ''  # 可选：显式指定 Agent；留空时从 SessionKey 推导
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -53,18 +54,52 @@ function Write-Log($msg) {
     "$ts $msg" | Out-File -Append -FilePath $LogFile -Encoding UTF8
 }
 
+# ===== T05 安全合规：默认拒绝（Deny by Default）=====
+# 白名单解析优先级：环境变量 INFINITY_CONTEXT_AGENTS > 配置文件 > 内置默认 @('main')
+# 显式配置为空数组 → 安全阻断；解析结果为空 → 拒绝执行
+function Get-AllowedAgents {
+    $list = @()
+    $explicitEmpty = $false
+    if ($env:INFINITY_CONTEXT_AGENTS -and $env:INFINITY_CONTEXT_AGENTS.Trim()) {
+        $list = @($env:INFINITY_CONTEXT_AGENTS -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    } else {
+        $cfg = "$env:LOCALAPPDATA\.openclaw\infinity-context.config.json"
+        if (Test-Path -LiteralPath $cfg) {
+            try {
+                $c = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($null -ne $c.allowedAgents) {
+                    $list = @($c.allowedAgents | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+                    if ($list.Count -eq 0) { $explicitEmpty = $true }
+                }
+            } catch {}
+        }
+    }
+    if ($list.Count -eq 0 -and -not $explicitEmpty) { $list = @('main') }
+    return @($list | Where-Object { $_ -match '^[A-Za-z0-9_-]+$' } | Select-Object -Unique)
+}
+$AllowedAgents = Get-AllowedAgents
+
+# AgentId 缺失时从 session key（agent:<id>:...）推导
+if (-not $AgentId -and $SessionKey -match '^agent:([^:]+):') { $AgentId = $Matches[1] }
+
+if (@($AllowedAgents).Count -eq 0) {
+    Write-Log 'SECURITY_ABORT: AllowedAgents 为空，按最小权限原则拒绝执行。'
+    exit 0
+}
+if (-not $AgentId -or $AgentId -notin $AllowedAgents) {
+    Write-Log "SECURITY_DENY: Agent '$AgentId' 未在授权白名单内，拒绝导出/压缩。"
+    exit 1
+}
+# ================================================
+
 function Export-Trajectory($key) {
     # Get session metadata for agentId
     try {
         $metaRaw = ''
-        $agentsDir = "$env:USERPROFILE\.openclaw\agents"
-        $agentList = @()
-        if (Test-Path $agentsDir) { $agentList = @(Get-ChildItem $agentsDir -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) }
+        # T05 安全修复：仅查询已授权的 Agent（不再枚举 agents 目录）
         $metaAll = New-Object System.Collections.ArrayList
-        foreach ($ag in $agentList) {
-            $mj = & openclaw sessions list --json --agent $ag 2>&1 | Out-String
-            if ($mj) { try { $mp = $mj | ConvertFrom-Json; foreach ($ms in @($mp.sessions)) { [void]$metaAll.Add($ms) } } catch {} }
-        }
+        $mj = & openclaw sessions list --json --agent $AgentId 2>&1 | Out-String
+        if ($mj) { try { $mp = $mj | ConvertFrom-Json; foreach ($ms in @($mp.sessions)) { [void]$metaAll.Add($ms) } } catch {} }
         $metaRaw = (@{ sessions = @($metaAll) } | ConvertTo-Json -Depth 12 -Compress) -replace '[\u0000-\u0008\u000B\u000C\u000E-\u001F]', ''
         $meta = $metaRaw | ConvertFrom-Json
         $sess = @($meta.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1

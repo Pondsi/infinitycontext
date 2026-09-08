@@ -1,5 +1,5 @@
 ﻿# ============================================================
-# main-session-monitor.ps1 v6.6 - 主会话上下文监控（09-08 压缩管线完整修复+sticky双修复版）
+# main-session-monitor.ps1 v7.1 - 主会话上下文监控（T05 默认拒绝白名单 + 安全加固版）
 # 背景：08-18 事故——main dashboard 会话上下文膨胀到 804%（210万/26万），
 #       ollama 超窗 aborted 导致回复中断 1 小时+；监控只检测不压缩（计划任务
 #       没传 -AutoCompact），内置压缩在 ollama 忙/超窗时失败，死锁到用户手动
@@ -61,21 +61,14 @@ function Get-PythonExe {
     return $null
 }
 $PyExe = Get-PythonExe
-# ===== T05 安全修复：会话枚举辅助函数（适配 openclaw 多 agent 要求）=====
-# 优先按白名单逐 agent 查询；白名单留空时自动探测本机 agent 目录（不硬编码、不使用全量枚举）
+# ===== T05 安全修复：会话枚举辅助函数（默认拒绝 / Deny by Default）=====
+# 仅查询白名单内的 Agent，绝不枚举 agents 目录、绝不回退为“全部允许”。
 function Get-SessionsJson {
-    $agents = @()
-    if ($AllowedAgents -and $AllowedAgents.Count -gt 0) {
-        $agents = @($AllowedAgents)
-    } else {
-        $agentsDir = "$env:USERPROFILE\.openclaw\agents"
-        if (Test-Path $agentsDir) {
-            $agents = @(Get-ChildItem $agentsDir -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-        }
-    }
+    $agents = @($AllowedAgents)
     if (-not $agents -or $agents.Count -eq 0) { return '{"sessions":[]}' }
     $all = New-Object System.Collections.ArrayList
     foreach ($a in $agents) {
+        if ($a -notmatch '^[A-Za-z0-9_-]+$') { continue }
         $j = & openclaw sessions list --json --agent $a 2>&1 | Out-String
         if ($j) {
             try {
@@ -100,10 +93,33 @@ $WakeIdleMin = 4               # v5.5：会话尾部无新写入超过此分钟�
 $StickyLimit = 5              # 连续失败 5 次 → 暂停该会话自动重试 30 分钟
 $StickyPauseMin = 30          # sticky 暂停时长（分钟）
 $EmergencyPct = 100.0         # 超过窗口 100% = 紧急态：不暂停，每轮必试压缩
-# ===== T05 安全合规配置（最小权限原则）=====
-# 仅处理白名单内的 Agent 会话（留空 = 不限制，但强烈建议显式指定）
-# 示例：$AllowedAgents = @('main', 'yai')
-$AllowedAgents = @()
+# ===== T05 安全合规配置（默认拒绝 / Deny by Default）=====
+# 白名单解析优先级：
+#   1) 环境变量 INFINITY_CONTEXT_AGENTS（逗号分隔，例：main,yai）
+#   2) 配置文件 %LOCALAPPDATA%\.openclaw\infinity-context.config.json 的 allowedAgents 数组
+#   3) 内置默认值 @('main')
+# 若显式配置为空数组 → 安全阻断退出（绝不回退为“全部允许”）。
+function Get-AllowedAgents {
+    $list = @()
+    $explicitEmpty = $false
+    if ($env:INFINITY_CONTEXT_AGENTS -and $env:INFINITY_CONTEXT_AGENTS.Trim()) {
+        $list = @($env:INFINITY_CONTEXT_AGENTS -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    } else {
+        $cfg = "$env:LOCALAPPDATA\.openclaw\infinity-context.config.json"
+        if (Test-Path -LiteralPath $cfg) {
+            try {
+                $c = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($null -ne $c.allowedAgents) {
+                    $list = @($c.allowedAgents | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+                    if ($list.Count -eq 0) { $explicitEmpty = $true }
+                }
+            } catch {}
+        }
+    }
+    if ($list.Count -eq 0 -and -not $explicitEmpty) { $list = @('main') }
+    return @($list | Where-Object { $_ -match '^[A-Za-z0-9_-]+$' } | Select-Object -Unique)
+}
+$AllowedAgents = Get-AllowedAgents
 
 # 是否允许脚本自主唤醒中断的会话（默认关闭，需用户显式授权 Opt-in）
 $EnableAutoWake = $false
@@ -142,6 +158,12 @@ function Write-Log {
     param([string]$msg)
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg"
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
+}
+
+# T05 安全修复：Fail-Closed 启动检查——白名单为空则拒绝运行（最小权限原则）
+if (@($AllowedAgents).Count -eq 0) {
+    Write-Log 'SECURITY_ABORT: AllowedAgents 为空。按最小权限原则必须显式授权至少一个 Agent，已拒绝运行。'
+    exit 0
 }
 
 # T09 安全修复：直接调用 openclaw 可执行文件 + 参数数组（无 shell 介入，杜绝命令注入）
@@ -459,11 +481,11 @@ try {
         $key = [string]$s.key
         if ($key -match 'weixin|wechat') { continue }
         if ([string]$s.status -eq 'killed') { continue }
-        # T05 安全修复：白名单拦截——仅处理授权 Agent 的会话，禁止越权跨 Agent 操作
-        if ($AllowedAgents.Count -gt 0) {
-            $agentId = [string]$s.agentId
-            if ($agentId -notin $AllowedAgents) { continue }
-        }
+        # T05 安全修复：白名单强制拦截——仅处理授权 Agent 的会话，禁止越权跨 Agent 操作
+        # agentId 缺失时从 session key（agent:<id>:...）推导，仍须通过白名单校验
+        $agentId = [string]$s.agentId
+        if (-not $agentId -and $key -match '^agent:([^:]+):') { $agentId = $Matches[1] }
+        if ($agentId -notin $AllowedAgents) { continue }
 
         # v5.8：所有代理的会话都压缩，不再限制 kind
         # 移除旧限制：if ($s.kind -ne 'direct') { continue }

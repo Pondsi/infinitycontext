@@ -347,6 +347,22 @@ openclaw gateway restart
 
 Лицензия MIT
 
+## Security / 安全模型
+
+**Deny by Default — no privileged operation runs unless it was explicitly authorized.**
+
+- **Agent allowlist**: only agents listed in `INFINITY_CONTEXT_AGENTS`, `%LOCALAPPDATA%\.openclaw\infinity-context.config.json` (`{"allowedAgents":["main"]}`), or the built-in default `main` are ever read or compacted. An empty list **aborts**; it never degrades to allow-all. The `~/.openclaw/agents` directory is not enumerated.
+- **Cleanup script**: `cleanup-old-backups.ps1` validates retention days (`1..3650`), anchors the target path to `%LOCALAPPDATA%\.openclaw\backups`, allows only backup file extensions, skips symlinks/junctions, and supports `-WhatIf`.
+- **No shell interpolation**: session keys are validated against a strict pattern before any `openclaw` invocation; no `powershell -Command` string building.
+- **No auto-wake by default**: `$EnableAutoWake = $false`; enabling it is an explicit opt-in.
+
+**默认拒绝 — 任何特权操作都必须先被显式授权，否则不执行。**
+
+- **Agent 白名单**：只有 `INFINITY_CONTEXT_AGENTS`、`%LOCALAPPDATA%\.openclaw\infinity-context.config.json`（`{"allowedAgents":["main"]}`）或内置默认值 `main` 中列出的 Agent 会被读取或压缩。白名单为空时**直接阻断**，绝不降级为“全部允许”；不再枚举 `~/.openclaw/agents` 目录。
+- **清理脚本**：`cleanup-old-backups.ps1` 校验保留天数（`1..3650`）、将目标路径锚定在 `%LOCALAPPDATA%\.openclaw\backups` 之内、仅允许备份类扩展名、跳过符号链接/Junction，并支持 `-WhatIf` 预演。
+- **无 shell 拼接**：调用 `openclaw` 前先对 session key 做严格正则校验，不使用 `powershell -Command` 字符串拼接。
+- **默认不自动唤醒**：`$EnableAutoWake = $false`，开启需显式授权。
+
 ## 隐私声明 / Privacy Statement
 
 本 Skill 会将对话上下文保存在本地纯内网的 SQLite 中以供检索，系统已内置正则脱敏机制屏蔽常见 API 密钥，且不依赖任何云端同步。所有数据仅存储于本机，不会外传。

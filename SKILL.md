@@ -1,5 +1,5 @@
 ---
-version: 0.8.0
+version: 0.9.0
 name: "infinity-context"
 description: "Universal AI agent context compression & memory optimization: never forget goals, details, or reasoning — works with OpenClaw, Claude, ChatGPT, Gemini, Dify, Ollama, and any agent platform"
 ---
@@ -123,7 +123,36 @@ Worst-case single reply:
 | StickyLimit | 5 | Failures before pause |
 | StickyPauseMin | 30 | Pause duration (minutes) |
 
-## Key Fixes (v6.8)
+## Security Model (v7.1)
+
+InfinityContext follows **Deny by Default** for every privileged operation.
+
+### Agent authorization (T05)
+
+Only agents explicitly listed in the allowlist are ever read, exported, or compacted. There is **no** "empty list means all agents" fallback.
+
+Resolution order:
+
+1. Environment variable `INFINITY_CONTEXT_AGENTS` (comma-separated, e.g. `main,yai`)
+2. Config file `%LOCALAPPDATA%\.openclaw\infinity-context.config.json` → `{"allowedAgents":["main","yai"]}`
+3. Built-in default: `@('main')`
+
+If the resolved list is empty (for example the config file explicitly contains `[]`), both scripts **abort** with a `SECURITY_ABORT` log entry instead of falling back to allow-all. `pipeline.ps1` additionally derives the agent from the session key (`agent:<id>:...`) and denies anything outside the allowlist.
+
+Neither script enumerates the `~/.openclaw/agents` directory any more.
+
+### Backup cleanup hardening (T09)
+
+`scripts/cleanup-old-backups.ps1` only touches files that satisfy **all** of:
+
+- `$RetentionDays` is a validated integer in `1..3650` (0 and negatives rejected)
+- the canonical target path is `%LOCALAPPDATA%\.openclaw\backups` itself or a real sub-directory of it (`GetFullPath` + separator-anchored prefix check, so `backups-evil` cannot pass)
+- the file extension is in `.jsonl .db .db-wal .db-shm .bak .tmp .json`
+- the file is not a reparse point (symlink / junction)
+
+It also supports `-WhatIf` / `-Confirm` (`SupportsShouldProcess`) so the deletion set can be audited before anything is removed.
+
+## Key Fixes (v7.1)
 
 | Version | Fix | Root Cause |
 |---------|-----|------------|
@@ -138,6 +167,12 @@ Worst-case single reply:
 | v6.7 | handler.js exports.default | Hook loader couldn't find handler |
 | v6.7 | pipeline.ps1 temp .py files | PowerShell string escaping broke inline Python |
 | v6.8 | Unified backup pipeline + dedup | Watchdog and hook duplicated backup work |
+| v7.0 | Memory file is pure JSON data | Instruction-hijacking pattern in agent memory |
+| v7.0 | Python via temp .py + argv | PowerShell string interpolation injection |
+| v7.0 | No policy-bypass flag / VBS launcher | Persistence-style launch path |
+| v7.1 | Allowlist is fail-closed | Empty allowlist degraded to allow-all |
+| v7.1 | No agents-directory enumeration | Cross-agent data collection |
+| v7.1 | Cleanup path canonical anchoring | Arbitrary-directory recursive deletion |
 
 ## SQLite FTS5 Search
 
