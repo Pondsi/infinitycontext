@@ -3,6 +3,27 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.3.2 — 2026-09-09
+
+Documentation correctness release. Two defects in the 1.3.1 instructions would have
+broken the promised out-of-the-box experience.
+
+### Fixed
+- **Registry slug.** Every install command said `clawhub install infinity-context`,
+  but the published slug is `infinitycontext` (no hyphen). The command returned
+  "Skill not found". All quick-starts, in every language, now use the real slug and
+  show a concrete command for dsh / Claude Code (`--workdir ~/.agents --dir skills`)
+  and for OpenClaw (`--workdir ~/.openclaw --dir skills`, or the workspace `skills/`
+  directory, which wins).
+- **dsh skill-discovery rules.** The docs claimed "the directory name must equal the
+  frontmatter `name`". The official DeepSeek Harness documentation and the
+  `dsh-skill-filesystem` package state otherwise: a skill is a directory bundle one
+  level deep (`<root>/<dir>/SKILL.md`) or a flat `<name>.md`, nested `**/SKILL.md`
+  files are deliberately not discovered, `name` and `description` are required, and
+  `name` must be kebab-case. The folder name is not part of the identity — dsh
+  addresses the skill by the frontmatter `name` — so the registry bundle
+  `infinitycontext/` works as installed.
+
 ## 1.3.1 — 2026-09-09
 
 Security-hardening release. Closes the two remaining audit warnings (T09 archive

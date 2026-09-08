@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.3.1"
+  version: "1.3.2"
   license: "MIT"
 ---
 
@@ -23,10 +23,11 @@ host that loads a standard `SKILL.md`.
 
 ```bash
 # dsh / Claude Code: lands in ~/.agents/skills/infinity-context/
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 
-# OpenClaw: installs into the OpenClaw skills directory
-clawhub install infinity-context
+# OpenClaw: managed skills (~/.openclaw/skills) or workspace skills (higher precedence)
+clawhub install infinitycontext --workdir ~/.openclaw --dir skills
+clawhub install infinitycontext --workdir <workspace> --dir skills
 ```
 
 ### 2. From source — pin the audited tag, verify every byte
@@ -52,8 +53,9 @@ must not pick up unaudited files.
 
 dsh uses the standard `SKILL.md` contract. Two rules matter:
 
-- the **directory name must equal the frontmatter `name`** → use `infinity-context`
-- **recursive discovery is not supported** → the skill folder must be a direct child of a discovery root
+- frontmatter `name` and `description` are **required**, and `name` must be kebab-case
+- a skill is a **directory bundle one level deep** (`<root>/<dir>/SKILL.md`) or a flat `<name>.md`; nested `**/SKILL.md` files are deliberately not discovered
+- the folder name does **not** have to match `name` — dsh identifies the skill by the frontmatter `name`, so the registry bundle `infinitycontext/` works as-is
 
 Use the user-level root `~/.agents/skills/infinity-context/` (rank 500, shared
 with Claude Code and other agents) or the project-level root
@@ -76,9 +78,8 @@ python3 scripts/cleanup.py --dry-run
 
 ## Quick start on OpenClaw
 
-After `clawhub install infinity-context`, the three scripts above are available
-unchanged; OpenClaw discovers the skill from its skills directory and calls them
-through its shell tool. The Windows compaction automation (hook + pipeline) is a
+The three scripts above are then available unchanged; OpenClaw discovers the skill
+from its skills directory and calls them through its shell tool. The Windows compaction automation (hook + pipeline) is a
 separate, optional integration that lives outside this package — see
 `openclaw/README.md` in the repository.
 
@@ -87,7 +88,7 @@ separate, optional integration that lives outside this package — see
 | Host | Install location | Notes |
 |------|------------------|-------|
 | **DeepSeek Harness (dsh)** | `~/.agents/skills/infinity-context/` or `<project>/.agents/skills/infinity-context/` | First-class; same contract as Claude Code |
-| **OpenClaw** | OpenClaw skills directory (see `clawhub install`) | First-class; optional hook documented in the repository |
+| **OpenClaw** | `<workspace>/skills/` (highest precedence) or `~/.openclaw/skills/` (managed) | First-class; optional hook documented in the repository |
 | **Claude Code** | `~/.claude/skills/infinity-context/` | `allowed-tools` pre-approves the declared capabilities |
 | **Cursor / Dify / Ollama / custom** | point the agent at this folder | Pure Python standard library |
 
@@ -178,8 +179,9 @@ MIT — see [LICENSE](LICENSE). Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 # 方式一：注册表（已扫描产物，无需 git、无需构建）
-clawhub install infinity-context --workdir ~/.agents --dir skills   # dsh / Claude Code
-clawhub install infinity-context                                     # OpenClaw
+clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
+clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw 托管技能
+clawhub install infinitycontext --workdir <workspace> --dir skills  # OpenClaw 工作区技能（优先）
 
 # 方式二：源码（固定已审计 tag + 逐文件校验，禁止使用可变分支）
 git clone https://github.com/Pondsi/infinitycontext.git
@@ -197,8 +199,9 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 
 ## 在 dsh 上快速开始
 
-- **目录名必须与 frontmatter 的 `name` 一致** → 用 `infinity-context`
-- **不支持递归发现** → 技能文件夹必须是发现根目录的直接子目录
+- frontmatter 的 `name` 与 `description` **必填**，且 `name` 必须是 kebab-case
+- 技能是**一层深的目录包**（`<root>/<dir>/SKILL.md`）或平铺文件 `<name>.md`；嵌套的 `**/SKILL.md` 故意不被发现
+- 文件夹名**不必**与 `name` 相同——dsh 用 frontmatter 的 `name` 作为标识（注册表安装出的目录是 `infinitycontext/`，同样可用）
 
 用户级 `~/.agents/skills/infinity-context/`（rank 500，与 Claude Code 共享）或项目级
 `<project>/.agents/skills/infinity-context/`（rank 200，优先）。重启 dsh，输入 `/`，
@@ -206,7 +209,7 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 
 ## 在 OpenClaw 上快速开始
 
-`clawhub install infinity-context` 后，上述三个脚本即可直接调用；OpenClaw 从技能目录
+`clawhub install infinitycontext` 后，上述三个脚本即可直接调用；OpenClaw 从技能目录
 发现本技能并通过 shell 工具执行。Windows 压缩自动化（hook + pipeline）属于**可选集成**，
 不在本包内，详见仓库 `openclaw/README.md`。
 

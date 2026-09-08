@@ -51,7 +51,8 @@ InfinityContext is a **universal AI agent skill** that keeps your conversations 
 
 ```bash
 # 1. Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
+clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 
 # 2. From source: pin the audited tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
@@ -119,7 +120,8 @@ InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远�
 
 ```bash
 # 方式一：注册表安装（已扫描产物，无需 git、无需构建）
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
+clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 
 # 方式二：源码安装——固定已审计 tag，并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
@@ -179,7 +181,7 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -206,7 +208,7 @@ InfinityContext は、小規模モデル（128K コンテキスト）のコン�
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -233,7 +235,7 @@ InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -260,7 +262,7 @@ InfinityContext es un Skill de OpenClaw que previene el desbordamiento de contex
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -287,7 +289,7 @@ InfinityContext é um Skill do OpenClaw que previne o transbordamento de context
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -314,7 +316,7 @@ InfinityContext est un Skill OpenClaw qui empêche le débordement de contexte d
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -341,7 +343,7 @@ InfinityContext ist ein OpenClaw-Skill, der Kontext-Überlauf in kleinen Modelle
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
@@ -368,7 +370,7 @@ InfinityContext — это навык OpenClaw, предотвращающий �
 
 ```bash
 # Registry install (scanned artifact, no git, no build step)
-clawhub install infinity-context --workdir ~/.agents --dir skills
+clawhub install infinitycontext --workdir ~/.agents --dir skills
 # From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
 ```
 
