@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # main-session-monitor.ps1 v6.6 - 主会话上下文监控（09-08 压缩管线完整修复+sticky双修复版）
 # 背景：08-18 事故——main dashboard 会话上下文膨胀到 804%（210万/26万），
 #       ollama 超窗 aborted 导致回复中断 1 小时+；监控只检测不压缩（计划任务
@@ -155,7 +155,7 @@ function Invoke-Compact {
             # 检查压缩后的 token 数
             Start-Sleep -Seconds 5
             try {
-                $afterJson = & openclaw sessions list --json --all-agents 2>&1 | Out-String
+                $afterJson = & openclaw sessions list --json 2>&1 | Out-String
                 $after = $afterJson | ConvertFrom-Json
                 $s2 = @($after.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                 if ($s2) {
@@ -342,7 +342,7 @@ function Release-CompressionLock() {
 }
 
 try {
-    $sessionsJson = & openclaw sessions list --json --all-agents 2>&1 | Out-String
+    $sessionsJson = & openclaw sessions list --json 2>&1 | Out-String
     if (-not $sessionsJson) { Write-Output "LIST_FAILED"; exit 0 }
 
     # 状态：失败记忆 + 告警冷却 + 压缩冷却（⚠️ PSCustomObject 索引访问对特殊字符 key 失效，必须转 hashtable）
@@ -596,51 +596,26 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                         $pythonExe = "C:\Python313\python.exe"
                         if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
                         
-                        $pythonScript = @"
-import sqlite3
-import json
-
-db_path = r'$sqlitePath'
-session_key = '$key'
+                        # T09 安全修复：使用临时 .py 文件 + 命令行参数，避免字符串插值注入
+                        $pyQueryFile = Join-Path $env:TEMP "oc_query_chunks.py"
+                        @'
+import sqlite3, json, sys
+db_path = sys.argv[1]
+session_key = sys.argv[2]
 conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-# v6.5：查询 session_chunks 表（不是 messages）
-cursor.execute('SELECT COUNT(*) FROM session_chunks WHERE session_key = ?', (session_key,))
-total = cursor.fetchone()[0]
-
-cursor.execute('SELECT MIN(start_msg_id), MAX(end_msg_id) FROM session_chunks WHERE session_key = ?', (session_key,))
-min_id, max_id = cursor.fetchone()
-
-# 获取关键 chunks
-cursor.execute('''
-    SELECT chunk_id, start_msg_id, end_msg_id, summary, keywords, raw_content
-    FROM session_chunks 
-    WHERE session_key = ?
-    ORDER BY chunk_id
-''', (session_key,))
-key_chunks = cursor.fetchall()
-
-# 输出结果
-result = {
-    'total_chunks': total,
-    'msg_id_range': [min_id, max_id],
-    'chunks': [
-        {
-            'chunk_id': c[0],
-            'msg_range': f"{c[1]}~{c[2]}",
-            'summary': c[3],
-            'keywords': c[4],
-            'content_preview': c[5][:200] if c[5] else ''
-        }
-        for c in key_chunks[:50]  # 最多50个chunks
-    ]
-}
+c = conn.cursor()
+c.execute('SELECT COUNT(*) FROM session_chunks WHERE session_key = ?', (session_key,))
+total = c.fetchone()[0]
+c.execute('SELECT MIN(start_msg_id), MAX(end_msg_id) FROM session_chunks WHERE session_key = ?', (session_key,))
+min_id, max_id = c.fetchone()
+c.execute('SELECT chunk_id, start_msg_id, end_msg_id, summary, keywords, raw_content FROM session_chunks WHERE session_key = ? ORDER BY chunk_id', (session_key,))
+key_chunks = c.fetchall()
+result = {'total_chunks': total, 'msg_id_range': [min_id, max_id], 'chunks': [{'chunk_id': c2[0], 'msg_range': f"{c2[1]}~{c2[2]}", 'summary': c2[3], 'keywords': c2[4], 'content_preview': c2[5][:200] if c2[5] else ''} for c2 in key_chunks[:50]]}
 conn.close()
 print(json.dumps(result, ensure_ascii=False))
-"@
+'@ | Set-Content -Path $pyQueryFile -Encoding UTF8 -Force
                         
-                        $sqliteResult = & $pythonExe -c $pythonScript 2>&1 | Out-String
+                        $sqliteResult = & $pythonExe $pyQueryFile $sqlitePath $key 2>&1 | Out-String
                         if ($sqliteResult) {
                             $sqliteData = $sqliteResult | ConvertFrom-Json
                             
@@ -674,46 +649,24 @@ print(json.dumps(result, ensure_ascii=False))
                             }
                             
                             # 用 Python 查询 SQLite 获取现有 chunks 构建 Navigation Map
-                            $navMapPython = @"
-import sqlite3
-import json
-
-db_path = r'$sqlitePath'
-session_key = '$key'
+                            # T09 安全修复：使用临时 .py 文件 + 命令行参数
+                            $pyNavFile = Join-Path $env:TEMP "oc_nav_map.py"
+                            @'
+import sqlite3, json, sys
+db_path = sys.argv[1]
+session_key = sys.argv[2]
 conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-# 获取所有 chunks 的摘要信息
-cursor.execute('''
-    SELECT chunk_id, start_msg_id, end_msg_id, summary, keywords, created_at
-    FROM session_chunks 
-    WHERE session_key = ?
-    ORDER BY chunk_id
-''', (session_key,))
-
-chunks = cursor.fetchall()
+c = conn.cursor()
+c.execute('SELECT chunk_id, start_msg_id, end_msg_id, summary, keywords, created_at FROM session_chunks WHERE session_key = ? ORDER BY chunk_id', (session_key,))
+chunks = c.fetchall()
 conn.close()
-
-# 生成 Navigation Map
-result = {
-    'total_chunks': len(chunks),
-    'chunks': [
-        {
-            'chunk_id': c[0],
-            'msg_range': f"{c[1]}~{c[2]}",
-            'summary': c[3],
-            'keywords': c[4],
-            'created_at': c[5]
-        }
-        for c in chunks
-    ]
-}
+result = {'total_chunks': len(chunks), 'chunks': [{'chunk_id': c2[0], 'msg_range': f"{c2[1]}~{c2[2]}", 'summary': c2[3], 'keywords': c2[4], 'created_at': c2[5]} for c2 in chunks]}
 print(json.dumps(result, ensure_ascii=False))
-"@
+'@ | Set-Content -Path $pyNavFile -Encoding UTF8 -Force
                             
                             $navMapData = $null
                             try {
-                                $navMapResult = & $pythonExe -c $navMapPython 2>&1 | Out-String
+                                $navMapResult = & $pythonExe $pyNavFile $sqlitePath $key 2>&1 | Out-String
                                 if ($navMapResult) { $navMapData = $navMapResult | ConvertFrom-Json }
                             } catch {}
                             
@@ -822,33 +775,25 @@ print(json.dumps(result, ensure_ascii=False))
                             # 修复点1b：Prompt Caching 排序——静态靠前，高频变化靠后
                             # 修复点3a：使用 .NET UTF-8 无 BOM 写入，防止中文乱码
                             # 优化点4：Prompt 负向约束——防止模型“脑补细节”
-                            $memoryContent = @"
-# Session State: $key
-
-$stateBoard
-
-$entityRouter
-
-## 如何查询详细历史
-- 使用 **search_session_history** 工具：按关键词搜索
-- 使用 **read_chunk_detail** 工具：按 Chunk ID 或区间（如 5-9）读取
-- SQLite 文件：$sqlitePath
-
-> ### 检索决策逻辑
-> 0. **L1 记忆短路**：如果回答问题所需的信息已经【完整存在于 Active State 或 Recent Chunks 的描述中】，**直接回答，严禁调用 Tool**。Tool 仅用于探究 L1 地图未涵盖的底层细节。
-> 1. **精确定位**：用户问特定文件/函数/配置 → 路由表有标记 → 直接 read_chunk_detail(chunk_id)
-> 2. **跨度探索**：用户问“为什么选这个方案”、“对比” → 提取检索词 → search_session_history(query)
-> 3. **多步深入**：search 命中但缺完整实现 → 根据返回的 chunk_id 追呼 read_chunk_detail
-> 4. **区间/离散读取**：用户问“Theme 1 的完整演进” → read_chunk_detail(chunk_id="5-9")；回顾某实体全生命周期 → read_chunk_detail("3,12,16")
-> 5. **代词与时态触发**：遇到「之前、最初、上一个、第二种、刚才的方案、改动前、撤销」等回溯词时，**严禁凭直觉回答**，必须调用 search_session_history 检索对应主题
-> 6. **引用声明约束**：凡通过 Tool 查得的历史事实，回复中必须标注来源（如 `根据 [Chunk 12] 的记录...`）；未查到则明确说明“未在历史中检索到”
-> 7. **时序覆盖法则（Versioning）**：如果 search_session_history 返回了多个探讨同一问题的 Chunk，**必须无条件信任 Chunk ID 最大的记录**，旧 ID 的实现视为已废弃代码。
-> 8. **工具调用话术规范（UX）**：当你需要调用 search_session_history 或 read_chunk_detail 时，必须分两步执行：①先向用户输出一行短语（如“*🔍 让我翻阅一下之前的架构设计...*”或“*📚 稍等，我查一下具体代码...*”）；②然后再执行 Tool Call。利用 Streaming 逐字输出特性，用户会先看到这句话，然后 UI 卡住几秒（等待工具返回），体验像人类在思考。
-> 9. **严禁推测**：不确定的历史细节必须先调用 Tool 确认原貌后再作答
-
-## History Navigation Map
-$navMap
-"@
+                            # T01 安全修复：仅写入纯数据 JSON，不包含任何指令性内容
+                            $memoryData = @{
+                                session_key = $key
+                                sqlite_file = $sqlitePath
+                                total_chunks = $sqliteData.total_chunks
+                                msg_id_range = $sqliteData.msg_id_range
+                                chunks = @($sqliteData.chunks | ForEach-Object {
+                                    @{
+                                        chunk_id = $_.chunk_id
+                                        start_msg_id = $_.start_msg_id
+                                        end_msg_id = $_.end_msg_id
+                                        summary = $_.summary
+                                        keywords = $_.keywords
+                                    }
+                                })
+                                nav_map = $navMap
+                                updated_at = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+                            }
+                            $memoryContent = $memoryData | ConvertTo-Json -Depth 5 -Compress
                             
                             # 最终大小检查（目标 < 2000 字符 ≈ 700 Token）
                             if ($memoryContent.Length -gt 2500) {
@@ -884,7 +829,7 @@ $navMap
                 # v5.2：压缩后验证会话状态（若被终结/轮换，绑定守卫会自动归档，保证记录不丢）
                 Start-Sleep -Seconds 5
                 try {
-                    $afterJson = & openclaw sessions list --json --all-agents 2>&1 | Out-String
+                    $afterJson = & openclaw sessions list --json 2>&1 | Out-String
                     $after = $afterJson | ConvertFrom-Json
                     $s2 = @($after.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                     if ($s2) {
@@ -904,7 +849,7 @@ $navMap
                                 # 等 10 秒后验证会话是否恢复
                                 Start-Sleep -Seconds 10
                                 try {
-                                    $wakeCheck = & openclaw sessions list --json --all-agents 2>&1 | Out-String
+                                    $wakeCheck = & openclaw sessions list --json 2>&1 | Out-String
                                     $wakeParsed = $wakeCheck | ConvertFrom-Json
                                     $wakeSess = @($wakeParsed.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                                     if ($wakeSess -and [string]$wakeSess.status -eq 'running') {
@@ -938,7 +883,7 @@ $navMap
                                 Invoke-WakeSession -SessionKey $key -Reason 'compact_rotated'
                                 Start-Sleep -Seconds 10
                                 try {
-                                    $wakeCheck2 = & openclaw sessions list --json --all-agents 2>&1 | Out-String
+                                    $wakeCheck2 = & openclaw sessions list --json 2>&1 | Out-String
                                     $wakeParsed2 = $wakeCheck2 | ConvertFrom-Json
                                     $wakeSess2 = @($wakeParsed2.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                                     if ($wakeSess2 -and [string]$wakeSess2.status -eq 'running') {

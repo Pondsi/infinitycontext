@@ -1,4 +1,4 @@
-﻿---
+---
 version: 0.2.0
 name: "infinity-context"
 description: "OpenClaw上下文压缩与记忆优化：防小模型溢出、看门狗自动压缩、SQLite检索、MEMORY精简"
@@ -71,12 +71,12 @@ Copy `src/session_to_sqlite.py` to `~/.openclaw/scripts/`.
 ```powershell
 # Watchdog: every 10 minutes
 schtasks /Create /TN "OpenClaw-MainSessionMonitor" /TR `
-  "wscript.exe //nologo `"scripts\RunHidden.vbs`" powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"scripts\main-session-monitor.ps1`" -AutoCompact" `
+  "powershell.exe -NoProfile -WindowStyle Hidden -File `"scripts\main-session-monitor.ps1`" -AutoCompact" `
   /SC MINUTE /MO 10 /RL LIMITED /F
 
 # Backup cleanup: every 7 days
 schtasks /Create /TN "OpenClaw-CleanupOldBackups" /TR `
-  "wscript.exe //nologo `"scripts\RunHidden.vbs`" powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"scripts\cleanup-old-backups.ps1`"" `
+  "powershell.exe -NoProfile -WindowStyle Hidden -File `"scripts\cleanup-old-backups.ps1`"" `
   /SC DAILY /MO 7 /ST 03:00 /RL LIMITED /F
 ```
 

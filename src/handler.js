@@ -29,36 +29,38 @@ function log(msg) {
 function runPipeline(sessionKey, phase) {
     if (!sessionKey) {
         log(`HOOK_${phase.toUpperCase()}: skipped (no sessionKey)`);
-        return;
+        return Promise.resolve();
     }
 
     log(`HOOK_${phase.toUpperCase()}: triggering for ${sessionKey}`);
 
-    try {
-        const child = spawn('powershell.exe', [
-            '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-File', PIPELINE_SCRIPT,
-            '-SessionKey', sessionKey,
-            '-Phase', phase
-        ], {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: true
-        });
+    return new Promise((resolve) => {
+        try {
+            const child = spawn('powershell.exe', [
+                '-NoProfile',
+                '-File', PIPELINE_SCRIPT,
+                '-SessionKey', sessionKey,
+                '-Phase', phase
+            ], {
+                detached: false,
+                stdio: 'ignore',
+                windowsHide: true
+            });
 
-        child.unref();
+            child.on('error', (err) => {
+                log(`HOOK_${phase.toUpperCase()}_SPAWN_ERR: ${sessionKey} ${err.message}`);
+                resolve();
+            });
 
-        child.on('error', (err) => {
-            log(`HOOK_${phase.toUpperCase()}_SPAWN_ERR: ${sessionKey} ${err.message}`);
-        });
-
-        child.on('exit', (code) => {
-            log(`HOOK_${phase.toUpperCase()}_EXIT: ${sessionKey} code=${code}`);
-        });
-    } catch (err) {
-        log(`HOOK_${phase.toUpperCase()}_EXCEPTION: ${sessionKey} ${err.message}`);
-    }
+            child.on('exit', (code) => {
+                log(`HOOK_${phase.toUpperCase()}_EXIT: ${sessionKey} code=${code}`);
+                resolve();
+            });
+        } catch (err) {
+            log(`HOOK_${phase.toUpperCase()}_EXCEPTION: ${sessionKey} ${err.message}`);
+            resolve();
+        }
+    });
 }
 
 const handler = async (event) => {
