@@ -72,6 +72,11 @@ processed:
 | cumulative characters | 64 MiB | `--max-total-chars` | parsing stops; `ingest.truncated_reason = total-chars-limit:<cap>` |
 | in-place redaction | 64 MiB | `MAX_REDACT_FILE_BYTES` | `--redact-file` refuses the file before reading it |
 
+Every limit is validated before any file is opened: each flag must be an integer in
+`1..hard ceiling`, so a negative or oversized value is rejected instead of bypassing the
+cap (a negative byte limit would otherwise reach `file.read(-1)` and read the whole
+transcript). `read_messages()` enforces the same range for library callers.
+
 Truncation is never silent: the JSON result carries `ingest.truncated` and
 `ingest.truncated_reason`, and `SECURITY_WARN: INGEST_TRUNCATED` is printed to stderr.
 
@@ -95,7 +100,9 @@ The archive holds conversation history, so the store is owner-only by constructi
 Creating the file with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600` removes both the
 check-then-chmod window and the symlink race. A pre-existing archive directory owned by
 another account is refused outright; a directory that is merely too permissive is
-tightened; a symbolic link on the path is refused. Windows ACLs are written with
+tightened; a symbolic link anywhere on the path is refused — every existing component
+between the root and the target is inspected, and Windows directory junctions are caught
+by comparing each component with its resolved path. Windows ACLs are written with
 in-process Win32 security API calls (`ctypes`), not by spawning `icacls`.
 
 The policy is **fail-closed**: if owner-only access cannot be enforced, the archiver

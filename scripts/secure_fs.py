@@ -24,7 +24,8 @@ Policy (fail-closed)
 --------------------
 * A pre-existing archive directory owned by another account is REFUSED.
 * A pre-existing archive directory that is merely too permissive is tightened.
-* A symbolic link anywhere on the target path is REFUSED.
+* A symbolic link (or a Windows directory junction) anywhere on the target
+  path is REFUSED: every existing component is inspected, not just the parent.
 * If owner-only access cannot be enforced (unsupported filesystem, API
   unavailable, ACL call rejected), this module raises ``UnsafeArchiveError``.
   It never returns a "best effort" success. The caller decides whether to abort
@@ -61,14 +62,46 @@ def _reject_symlink(path: Path) -> None:
         raise UnsafeArchiveError(f"refusing to use a symbolic link: {path}")
 
 
+def _norm_path(path: os.PathLike | str) -> str:
+    """Absolute, normalised, case-folded on Windows (for comparison only)."""
+    text = os.path.normpath(os.path.abspath(str(path)))
+    return os.path.normcase(text) if IS_WINDOWS else text
+
+
 def _reject_symlinked_parent(target: Path) -> None:
-    parent = target.parent
-    if parent == target:
-        return
-    if os.path.islink(parent):
-        raise UnsafeArchiveError(
-            f"refusing to operate inside a symbolic link directory: {parent}"
-        )
+    """Refuse when any existing component of the target's path is a link.
+
+    Inspecting only ``target.parent`` misses a link higher up: for
+    ``/trusted/link/subdir/archive.db`` where ``/trusted/link`` is a link and
+    ``subdir`` is a real directory, ``os.path.islink(target.parent)`` is false
+    and the write would follow the earlier link. Every existing ancestor is
+    therefore checked twice: ``os.path.islink`` catches POSIX/Windows symbolic
+    links, and the resolved-path comparison additionally catches Windows
+    directory junctions, for which ``os.path.islink`` returns false.
+    """
+    components: list[Path] = []
+    current = target.parent
+    while True:
+        components.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for component in reversed(components):
+        if os.path.islink(component):
+            raise UnsafeArchiveError(
+                f"refusing to operate inside a symbolic link directory: {component}"
+            )
+        try:
+            resolved = os.path.realpath(component)
+        except OSError as exc:
+            raise UnsafeArchiveError(f"cannot resolve {component}: {exc}") from exc
+        if _norm_path(component) != _norm_path(resolved):
+            raise UnsafeArchiveError(
+                "refusing to operate through a redirected path component: "
+                f"{component} resolves to {resolved}"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.6.4"
+  version: "1.6.5"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -36,8 +36,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.4
-grep -q '^version: "1.6.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.5
+grep -q '^version: "1.6.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 
@@ -148,10 +148,10 @@ pinned revision and checksums.
 |---------|---------|-------|
 | archive directory | `~/.infinity-context/archive` | `--output-dir` / `--archive-dir`, or `INFINITY_CONTEXT_HOME` |
 | `MAX_ARCHIVE_LENGTH` | `20000` characters | `scripts/session_to_sqlite.py` |
-| ingest file cap | 64 MiB | `--max-session-bytes` |
-| ingest line cap | 1 MiB | `--max-line-bytes` |
-| ingest message cap | 200000 | `--max-messages` |
-| ingest character cap | 64 MiB | `--max-total-chars` |
+| ingest file cap | 64 MiB (hard ceiling) | `--max-session-bytes` (1..ceiling) |
+| ingest line cap | 1 MiB (hard ceiling) | `--max-line-bytes` (1..ceiling) |
+| ingest message cap | 200000 (hard ceiling) | `--max-messages` (1..ceiling) |
+| ingest character cap | 64 MiB (hard ceiling) | `--max-total-chars` (1..ceiling) |
 | redaction rules | built in | `scripts/session_to_sqlite.py` (add `redact_rules.json` beside it to extend) |
 | retention | 30 days | `cleanup.py --days` (1..3650) |
 
@@ -197,8 +197,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills  # OpenClaw �
 # 方式二：源码（固定已审计 tag + 逐文件校验，禁止使用可变分支）
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.4
-grep -q '^version: "1.6.4"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.5
+grep -q '^version: "1.6.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS：shasum -a 256 -c checksums.txt
 mkdir -p ~/.agents/skills/infinity-context/scripts
 mkdir -p ~/.agents/skills/infinity-context/references

@@ -3,6 +3,23 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.5 — 2026-09-09
+
+Reviewer-driven hardening of the 1.6.2 ingestion bounds and the filesystem guard.
+
+### Fixed
+- **Ingestion limits are validated.** `--max-session-bytes`, `--max-line-bytes`,
+  `--max-messages` and `--max-total-chars` must be integers in `1..hard ceiling`; the
+  CLI rejects anything else before opening a file, and `read_messages()` enforces the
+  same range for library callers. A negative byte limit could otherwise reach
+  `file.read(-1)` and pull the whole transcript into memory, and an oversized value
+  could exceed the documented ceiling.
+- **Every path component is checked for redirection.** `secure_fs` no longer inspects
+  only the immediate parent: all existing components between the filesystem root and
+  the target are checked with `os.path.islink`, and each component must also equal its
+  resolved path, which catches Windows directory junctions (where `islink` is false).
+  This closes `/trusted/link/subdir/archive.db`, where the link sits above the parent.
+
 ## 1.6.4 — 2026-09-09
 
 Signature refresh requested by the author.

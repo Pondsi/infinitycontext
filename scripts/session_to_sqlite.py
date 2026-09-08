@@ -341,6 +341,18 @@ def redact_file_in_place(path, allow_dir=None):
     return len(redacted)
 
 
+def _check_limits(pairs):
+    """Validate configurable limits: positive ints within the hard ceilings.
+
+    The constants above are immutable ceilings; callers may only ask for
+    something stricter. ``max_bytes = -1`` would otherwise reach
+    ``file.read(-1)`` and load the whole transcript into memory.
+    """
+    for name, value, hard_max in pairs:
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= hard_max:
+            raise ValueError(f"{name} must be an integer between 1 and {hard_max}")
+
+
 def read_messages(session_file, max_bytes=MAX_SESSION_BYTES,
                   max_line_bytes=MAX_LINE_BYTES, max_messages=MAX_MESSAGES,
                   max_total_chars=MAX_TOTAL_CHARS):
@@ -352,6 +364,13 @@ def read_messages(session_file, max_bytes=MAX_SESSION_BYTES,
       3. 消息条数 / 累计字符数达到上限立即停止解析。
     返回 (messages, stats)；stats 如实记录触发了哪一个上限，绝不静默截断。
     """
+    _check_limits((
+        ('max_bytes', max_bytes, MAX_SESSION_BYTES),
+        ('max_line_bytes', max_line_bytes, MAX_LINE_BYTES),
+        ('max_messages', max_messages, MAX_MESSAGES),
+        ('max_total_chars', max_total_chars, MAX_TOTAL_CHARS),
+    ))
+
     stats = {
         'file_bytes': 0,
         'bytes_read': 0,
@@ -538,6 +557,17 @@ def main():
 
     global _ALLOW_INSECURE_STORAGE
     _ALLOW_INSECURE_STORAGE = bool(args.allow_insecure_storage)
+
+    # 阶段 -1：可配置上限必须先通过校验，才允许任何文件操作
+    try:
+        _check_limits((
+            ('--max-session-bytes', args.max_session_bytes, MAX_SESSION_BYTES),
+            ('--max-line-bytes', args.max_line_bytes, MAX_LINE_BYTES),
+            ('--max-messages', args.max_messages, MAX_MESSAGES),
+            ('--max-total-chars', args.max_total_chars, MAX_TOTAL_CHARS),
+        ))
+    except ValueError as exc:
+        parser.error(str(exc))
 
     # 阶段 0：脱敏引擎必须在任何文件/数据库操作之前就绪（Fail-Closed）
     try:
