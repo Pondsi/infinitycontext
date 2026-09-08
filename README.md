@@ -10,15 +10,19 @@
 
 ### What is this?
 
-InfinityContext is an AI Agent Skill that prevents context overflow in small models (128K context). It provides multi-layer compression, automatic backup, and FTS5 search to keep conversations running indefinitely.
+InfinityContext is a **universal AI agent skill** that keeps your conversations forever — no context overflow, no forgotten goals, no lost details. Works with **any agent platform**: OpenClaw, Claude, ChatGPT, Gemini, Dify, Ollama, Cursor, or custom API.
+
+> **Core promise**: Whether you're using a 64K or 1M context model, switching between models mid-conversation, or running dozens of back-and-forth turns — InfinityContext ensures the agent always remembers **what it's doing**, **what it's done**, **how it did it**, and **every detail in between**. When you need specifics, it knows **when, where, and how** to retrieve them.
 
 ### Features
 
-- **Multi-layer protection**: Config → Pipeline → Hook → Memory
-- **Automatic backup**: Trajectory exported before every compaction
-- **SQLite + FTS5 search**: Compressed sessions searchable via trigram index
-- **Deduplication**: 5-minute window prevents duplicate backups
-- **All compaction paths**: Manual, auto-compact, and watchdog all covered
+- 🔒 **Never forget**: Multi-layer compression keeps context within safe bounds while preserving all critical information
+- 🧠 **Full memory**: Goals, actions, reasoning process, results, and intermediate details — all retained
+- 🔄 **Model-agnostic**: Works with 64K, 128K, 1M context models; seamless switching between them
+- 📦 **Automatic backup**: Every compaction triggers trajectory export + SQLite indexing
+- 🔍 **FTS5 search**: Compressed sessions fully searchable via trigram index
+- 🛡️ **Triple coverage**: Manual, auto-compact, and watchdog — all paths protected
+- ⚡ **Deduplication**: 5-minute window prevents redundant backups
 
 ### Quick Start
 
@@ -67,15 +71,19 @@ MIT License
 
 ### 这是什么？
 
-InfinityContext 是一个 AI Agent Skill，解决小模型（128K 上下文）对话中上下文溢出的问题。通过多层压缩机制，让任何大小的模型都能持续对话而不中断。
+InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远完整——不溢出、不遗忘目标、不丢失任何细节。适用于**所有智能体平台**：OpenClaw、Claude、ChatGPT、Gemini、Dify、Ollama、Cursor，或任何自定义 API。
+
+> **核心承诺**：无论你使用 64K 还是 1M 上下文的模型，无论对话中切换模型，无论进行了多少轮交互——InfinityContext 确保智能体始终记得**要做什么**、**做过什么**、**怎么做的**，以及**每一个中间细节**。当你需要具体信息时，它知道**什么时候、在哪里、怎么查**。
 
 ### 功能特性
 
-- **三层防护**：配置层 → 管线层 → Hook 层 → 记忆层
-- **自动备份**：每次压缩前导出完整轨迹
-- **SQLite + FTS5 搜索**：压缩后的会话可通过三元组索引搜索
-- **去重机制**：5 分钟窗口避免重复备份
-- **全覆盖压缩路径**：手动、自动压缩、看门狗全部覆盖
+- 🔒 **永不遗忘**：多层压缩保持上下文在安全范围内，同时保留所有关键信息
+- 🧠 **完整记忆**：目标、行动、推理过程、结果、中间细节——全部保留
+- 🔄 **模型无关**：支持 64K、128K、1M 上下文模型；模型间无缝切换
+- 📦 **自动备份**：每次压缩触发轨迹导出 + SQLite 索引
+- 🔍 **FTS5 搜索**：压缩后的会话可通过三元组索引完整搜索
+- 🛡️ **三重覆盖**：手动、自动压缩、看门狗——所有路径受保护
+- ⚡ **去重机制**：5 分钟窗口避免重复备份
 
 ### 快速开始
 
