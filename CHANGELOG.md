@@ -3,6 +3,18 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.3.3 — 2026-09-09
+
+Robustness fix found while validating the published package end to end.
+
+### Fixed
+- **BOM-prefixed transcripts were silently dropped.** A JSONL transcript that starts
+  with a UTF-8 byte-order mark made `json.loads` fail on the first line, and the
+  archiver skipped it without a word — so a single-line transcript produced zero
+  chunks. The reader now opens transcripts as `utf-8-sig`, which transparently
+  consumes a BOM and behaves like `utf-8` otherwise. Verified both ways: a BOM file
+  and a plain file each archive exactly one chunk.
+
 ## 1.3.2 — 2026-09-09
 
 Documentation correctness release. Two defects in the 1.3.1 instructions would have

@@ -123,7 +123,7 @@ def truncate_for_archive(text, limit=MAX_ARCHIVE_LENGTH):
 
 def redact_file_in_place(path):
     """对给定文件原地脱敏（供轨迹备份复用同一套规则），返回字节数。"""
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
         data = f.read()
     redacted = redact_sensitive_info(data)
     tmp = path + '.redact.tmp'
@@ -270,7 +270,8 @@ def main():
 
     # Read JSONL
     messages = []
-    with open(session_file, 'r', encoding='utf-8') as f:
+    # utf-8-sig 透明吞掉 BOM：否则带 BOM 的轨迹首行 JSON 会被静默丢弃
+    with open(session_file, 'r', encoding='utf-8-sig') as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
