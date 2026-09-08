@@ -52,10 +52,22 @@ disables archiving entirely — the script writes no file and returns `status: d
 |-------|---------|
 | `session_chunks` | one row per conversation chunk: `session_key`, `start_msg_id`, `end_msg_id`, `summary`, `keywords`, `anchor_questions`, `raw_content`, `created_at` |
 | `chunk_fts` | FTS5 (trigram) mirror of the searchable columns, kept in sync by an `AFTER INSERT` trigger |
+| `archive_metadata` | one row per session key (`session_key`, `format_version`); written on create and on append, and checked read-only before any append target is opened for writing |
 | indexes | `idx_session_key`, `idx_created_at`, `idx_chunk_unique (session_key, start_msg_id, end_msg_id)` |
 
 `INSERT OR IGNORE` plus the unique index makes re-importing the same transcript
 idempotent, so a host can safely re-run the archiver.
+
+### Append target selection (T09)
+
+`--append` never picks a database by prefix. It requires the complete artifact name
+`{safe_key}-YYYYMMDD-HHMMSS.db`, opens the candidate **read-only** and verifies that
+`archive_metadata.session_key` equals the requested key (an archive created before
+`archive_metadata` existed falls back to an exact row check in `session_chunks` and is
+upgraded on the next write). A symlink, a foreign database, a path outside `--output-dir`,
+or more than one matching candidate aborts with exit 9 before any row is touched;
+`--db-path` chooses one explicitly. Retention purging therefore can only ever run against
+the database that was identity-checked.
 
 ### Redaction and minimisation
 

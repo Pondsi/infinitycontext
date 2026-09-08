@@ -1,0 +1,78 @@
+name: Bug report
+description: Something is broken or behaves differently from the documentation
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not paste secrets, API keys or private transcripts.
+        Redact anything sensitive before submitting.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and discussions for the same problem
+          required: true
+        - label: I am using the latest release (check the tag/version in SKILL.md)
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: InfinityContext version
+      description: The `version` in SKILL.md frontmatter, or the ClawHub version
+      placeholder: "1.8.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - DeepSeek Harness (dsh)
+        - OpenClaw
+        - Claude Code
+        - Cursor
+        - Dify
+        - Ollama
+        - Other / custom agent
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and Python version
+      placeholder: "Windows 11 26200, Python 3.13.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the exact command and the JSON result if there is one (redacted).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `python3 scripts/session_to_sqlite.py ...`
+        2. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste redacted stdout/stderr. Never paste credentials or raw transcripts.
+      render: shell
+    validations:
+      required: false

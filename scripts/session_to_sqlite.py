@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # session_to_sqlite.py - 会话 JSONL 转换为 SQLite（支持 FTS5 全文检索）
-# 调用：python session_to_sqlite.py --session-key KEY --session-file FILE --output-dir DIR [--append]
+# 调用：python session_to_sqlite.py --session-key KEY --session-file FILE --output-dir DIR [--append [--db-path FILE]]
 # 作者：Pondsi
-# 版本：v2.6 (2026-09-09)
+# 版本：v2.8 (2026-09-09) — --append 改为完整文件名匹配 + 只读身份校验（T09）
 
 import io
 import json
@@ -438,6 +438,51 @@ def purge_expired(cursor, retention_days):
     return len(ids)
 
 
+ARCHIVE_FORMAT_VERSION = 2
+
+
+def db_identity_ok(db_path, session_key):
+    """1.8.3：只读校验候选数据库确实属于该 session_key。
+
+    T09（v2.8）：--append 以前用 ``f.startswith(safe_key)`` 选库，``agent`` 会
+    误命中 ``agent-admin-*.db``，而且选完就直接读写。现在改为：
+      1. 文件名必须完整匹配 ``{safe_key}-YYYYMMDD-HHMMSS.db``；
+      2. 打开前先只读校验身份（archive_metadata 精确匹配，旧库回退到
+         session_chunks 内该 key 的行数 > 0）；
+      3. 身份不符或存在多个候选一律拒绝（退出码 9），绝不静默选一个。
+    返回 (ok, reason)。
+    """
+    if os.path.islink(db_path) or not os.path.isfile(db_path):
+        return False, 'candidate is not a regular file'
+    try:
+        conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
+    except sqlite3.Error as exc:
+        return False, f'cannot open candidate read-only: {exc}'
+    try:
+        cur = conn.cursor()
+        names = {row[0] for row in cur.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
+        if not {'session_chunks', 'chunk_fts'}.issubset(names):
+            return False, 'candidate is not an InfinityContext database'
+        if 'archive_metadata' in names:
+            row = cur.execute(
+                'SELECT COUNT(*) FROM archive_metadata WHERE session_key = ?',
+                (session_key,)).fetchone()
+            if row and row[0]:
+                return True, ''
+            return False, 'archive_metadata does not contain this session key'
+        row = cur.execute(
+            'SELECT COUNT(*) FROM session_chunks WHERE session_key = ?',
+            (session_key,)).fetchone()
+        if row and row[0]:
+            return True, ''
+        return False, 'candidate database holds no rows for this session key'
+    except sqlite3.Error as exc:
+        return False, f'candidate check failed: {exc}'
+    finally:
+        conn.close()
+
+
 def purge_only(output_dir, retention_days):
     """对归档目录内每个 InfinityContext 数据库执行一次保留期清理。
 
@@ -662,6 +707,9 @@ def main():
     parser.add_argument('--session-file', required=False, help='Path to events.jsonl')
     parser.add_argument('--output-dir', required=False, help='Output directory for SQLite files')
     parser.add_argument('--append', action='store_true', help='Append to existing SQLite file')
+    parser.add_argument('--db-path', default=None,
+                        help='with --append: exact database file to append to; must live inside '
+                             '--output-dir and pass the identity check')
     parser.add_argument('--redact-file', help='Redact sensitive data in-place in the given file, then exit')
     parser.add_argument('--allow-dir', default=None,
                         help='with --redact-file: refuse any path outside this directory')
@@ -843,14 +891,51 @@ def main():
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
 
     if append_mode:
-        # Find existing SQLite file (first one)
-        existing = sorted([f for f in os.listdir(output_dir)
-                           if f.startswith(safe_key) and f.endswith('.db')])
-        if existing:
-            db_path = os.path.join(output_dir, existing[0])
+        # T09（v2.8）：只接受完整文件名 ``{safe_key}-YYYYMMDD-HHMMSS.db``，
+        # 并在读写之前做只读身份校验；歧义或多候选一律拒绝。
+        if args.db_path:
+            db_path = os.path.abspath(args.db_path)
+            if os.path.dirname(db_path) != os.path.abspath(output_dir):
+                print(json.dumps({'status': 'error', 'mode': 'archive',
+                                  'error': '--db-path must live inside --output-dir'}))
+                sys.exit(9)
+            if not os.path.exists(db_path):
+                print(json.dumps({'status': 'error', 'mode': 'archive',
+                                  'error': f'--db-path does not exist: {db_path}'}))
+                sys.exit(9)
+            ok, why = db_identity_ok(db_path, session_key)
+            if not ok:
+                print(json.dumps({'status': 'error', 'mode': 'archive',
+                                  'error': f'--db-path rejected: {why}',
+                                  'db_path': db_path}))
+                sys.exit(9)
         else:
-            db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
+            artifact_re = re.compile(rf'^{re.escape(safe_key)}-\d{{8}}-\d{{6}}\.db$')
+            candidates = sorted(
+                name for name in os.listdir(output_dir)
+                if artifact_re.fullmatch(name)
+                and not os.path.islink(os.path.join(output_dir, name))
+            )
+            if len(candidates) > 1:
+                print(json.dumps({'status': 'error', 'mode': 'archive',
+                                  'error': 'ambiguous append target: several databases match '
+                                           'this session key; pass --db-path to choose one',
+                                  'candidates': candidates}))
+                sys.exit(9)
+            if candidates:
+                candidate = os.path.join(output_dir, candidates[0])
+                ok, why = db_identity_ok(candidate, session_key)
+                if not ok:
+                    print(json.dumps({'status': 'error', 'mode': 'archive',
+                                      'error': f'append target rejected: {why}',
+                                      'db_path': candidate}))
+                    sys.exit(9)
+                db_path = candidate
+            else:
+                db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
     else:
+        if args.db_path:
+            parser.error('--db-path requires --append')
         db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
 
     # 关键：在任何文件创建之前记录该库是否为本轮新建——决定失败时能否物理删除
@@ -887,6 +972,12 @@ def main():
         except sqlite3.Error:
             pass
         cursor.execute('''
+        CREATE TABLE IF NOT EXISTS archive_metadata (
+            session_key TEXT PRIMARY KEY,
+            format_version INTEGER NOT NULL
+        )
+        ''')
+        cursor.execute('''
         CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
             chunk_id UNINDEXED,
             session_key,
@@ -912,6 +1003,9 @@ def main():
 
         # 单事务写入：保留期清理与本次写入同属一个事务，要么全部生效，要么全部回滚
         with conn:
+            cursor.execute(
+                'INSERT OR IGNORE INTO archive_metadata (session_key, format_version) VALUES (?, ?)',
+                (session_key, ARCHIVE_FORMAT_VERSION))
             purged_chunks = purge_expired(cursor, args.retention_days)
             cursor.executemany('''
                 INSERT OR IGNORE INTO session_chunks

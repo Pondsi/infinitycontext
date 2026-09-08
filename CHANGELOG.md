@@ -3,6 +3,31 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.3 — 2026-09-09
+
+Fixes a real append-target selection bug found by the ClawHub review of 1.8.2.
+
+### Fixed
+- **`--append` no longer selects a database by filename prefix.** A sanitized key of
+  `agent` used to match `agent-admin-20260909-010203.db`, and the lexicographically first
+  match was opened read/write — so an append could insert rows into, and run retention
+  purging against, another session's archive. Selection now requires the complete artifact
+  name `{safe_key}-YYYYMMDD-HHMMSS.db`.
+- **The append target is identity-checked before it is opened for writing.** The candidate
+  is opened **read-only** first and must contain the exact `session_key` in the new
+  `archive_metadata` table (archives created before that table fall back to an exact row
+  check and are upgraded on the next write). A symlink, a foreign database, a path outside
+  `--output-dir`, or more than one candidate aborts with exit 9 before any row is touched.
+- **`--db-path`** selects an append target explicitly when more than one database matches,
+  and is validated to live inside `--output-dir` and pass the same identity check.
+- Retention purging can now only run against the database that passed the identity check.
+
+### Added
+- `archive_metadata (session_key, format_version)` table, written on create and append.
+- `_test_v183.py`: overlapping keys (`agent` / `agent-admin`, `abc` / `abcd`), multiple
+  timestamped databases, foreign databases with valid-looking names, explicit `--db-path`
+  selection, legacy archives without metadata, and metadata upgrade — 19 checks.
+
 ## 1.8.2 — 2026-09-09
 
 Documentation accuracy pass, driven by the ClawHub review of 1.8.1.

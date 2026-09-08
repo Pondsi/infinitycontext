@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest a capability or an improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        InfinityContext stays deliberately small: the published package is a portable
+        Python core with no network, no shell and no subprocesses. Requests that keep
+        that boundary are much easier to accept.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation, not only the proposed solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Package boundary
+      options:
+        - label: This can be done without adding network access, a shell, or subprocesses to the portable core
+          required: false

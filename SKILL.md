@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.8.2"
+  version: "1.8.3"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -59,8 +59,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.2
-grep -q '^version: "1.8.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.3
+grep -q '^version: "1.8.3"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 ```
@@ -147,6 +147,7 @@ bounded by default (30 days), so history stays inside a known window.
 - **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. Rules are validated and **precompiled at startup**: a malformed `redact_rules.json`, a wrong field type or an uncompilable regex aborts the run before any database is created, and a failure while applying a rule aborts instead of skipping it. `session_key` is sanitised **before** it is used for any path or filename — a value outside the safe identifier format (or one that itself looks sensitive) becomes an opaque hash, so it never reaches a filename, the table or the FTS index. The transcript is redacted entirely in memory, then written in a single transaction; on failure the transaction rolls back and only a database created by that same run is removed — an existing archive being appended to is never deleted. High-entropy candidates are excluded from the keyword index. In-place redaction (`--redact-file`) additionally **requires `--allow-dir`** and resolves every symbolic link before comparing paths: the lexical path, the resolved path and the resolved allowed directory must all agree, so a symlinked ancestor inside the allowed directory cannot redirect the write elsewhere. A non-ASCII output path is **refused** by default (exit 8); only an explicit `--allow-dir-fallback` moves the archive to the ASCII fallback directory, and the run then prints a warning and reports `archive_dir_fallback: true` together with `requested_dir` and `archive_dir` — the location is never changed silently.
 - **Data minimisation** — `MAX_ARCHIVE_LENGTH` truncates oversized content (head + tail kept) before storage. Ingestion itself is bounded **before** parsing: at most `--max-session-bytes` (64 MiB) is read from the head of the transcript, a line longer than `--max-line-bytes` (1 MiB) is discarded before JSON or any regex sees it, and ingestion stops at `--max-messages` (200000) or `--max-total-chars` (64 MiB). The result reports `ingest.truncated` and `ingest.truncated_reason`, so a bounded archive is never presented as a complete one. In-place redaction refuses a file larger than 64 MiB before reading it.
 - **Bounded retention, default 30 days** — archiving is not unbounded. Every run purges chunks older than `--retention-days` (default 30, range 1..3650) from `session_chunks` and its FTS mirror inside the same transaction, and reports the count as `purged_chunks`; `--purge-only --output-dir <dir>` applies the same policy to existing archives without ingesting, and only to a directory that carries the archive marker. Keeping chunks forever requires the explicit `--allow-unbounded-retention` flag. Set `INFINITY_CONTEXT_NO_ARCHIVE=1` to disable archiving entirely — the script writes no file and reports `status: disabled`.
+- **Append is identity-checked, not prefix-matched** — `--append` only accepts a file whose **complete** name is `{safe_key}-YYYYMMDD-HHMMSS.db`, opens it **read-only first** and requires the exact `session_key` in `archive_metadata` (older archives fall back to a row check), then upgrades the archive with that metadata row. A foreign database, a symlink, a path outside `--output-dir`, or more than one candidate all abort with exit 9 before anything is written; `--db-path` picks one explicitly.
 - **Deny-by-default filesystem rules** — `cleanup.py` refuses any directory that lacks the owner-only `.infinity-context-archive` marker, refuses protected directories (filesystem root, home, common user folders), only deletes files whose **full name** matches an InfinityContext artifact pattern, never recurses into subdirectories, re-checks each candidate with `lstat` immediately before deletion, validates the `session_chunks`/`chunk_fts` schema in read-only mode before any `VACUUM`, and does nothing unless **both** `--apply` and `--confirm-destructive` are given.
 
 ### Data sensitivity notice
@@ -182,6 +183,7 @@ pinned revision and checksums.
 | ingest message cap | 200000 (hard ceiling) | `--max-messages` (1..ceiling) |
 | ingest character cap | 64 MiB (hard ceiling) | `--max-total-chars` (1..ceiling) |
 | redaction rules | built in | `scripts/session_to_sqlite.py` (add `redact_rules.json` beside it to extend) |
+| append target | exact filename + identity check | `--append` matches `{key}-YYYYMMDD-HHMMSS.db` exactly, verifies `archive_metadata` read-only, and refuses an ambiguous or foreign database (exit 9); `--db-path` selects one explicitly |
 | retention (archive contents) | 30 days | `session_to_sqlite.py --retention-days` (1..3650; `0` needs `--allow-unbounded-retention`) |
 | manual retention pass | off | `session_to_sqlite.py --purge-only --output-dir <dir>` |
 | disable archiving | off | env `INFINITY_CONTEXT_NO_ARCHIVE=1` |
