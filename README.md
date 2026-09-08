@@ -57,55 +57,108 @@ When you install that hook from the GitHub repository, it launches exactly one s
 
 ### What is this?
 
-InfinityContext is a **universal AI agent skill** that keeps your conversations forever — no context overflow, no forgotten goals, no lost details. It is a standard `SKILL.md`, so it runs on **any Agent Skills host**, with first-class support for **DeepSeek Harness (dsh)** — drop it into `.agents/skills/` and the harness discovers it — plus Claude Code, OpenClaw, Cursor, Dify, Ollama, and custom agents.
+InfinityContext is a **portable AI-agent skill** (a standard `SKILL.md` bundle) that keeps long sessions usable: it compresses context, archives **redacted** conversation chunks into a **local** SQLite/FTS5 store, and retrieves exact details from an earlier turn. It runs on **any Agent Skills host** — first-class support for **DeepSeek Harness (dsh)** (drop it into `.agents/skills/` and the harness discovers it) — plus Claude Code, OpenClaw, Cursor, Dify, Ollama and custom agents.
 
-> **Core promise**: Whether you're using a 64K or 1M context model, switching between models mid-conversation, or running dozens of back-and-forth turns — InfinityContext ensures the agent always remembers **what it's doing**, **what it's done**, **how it did it**, and **every detail in between**. When you need specifics, it knows **when, where, and how** to retrieve them.
+> **Scope, stated plainly.** This package is the portable Python core. It reads a session transcript, writes a local archive, and answers searches. It has **no network access, no shell, no subprocesses and no background service**. Everything it can do to your files is listed in the disclosure table at the top of `SKILL.md`.
 
-### Features
+### What it does
 
-- 🔒 **Never forget**: Multi-layer compression keeps context within safe bounds while preserving all critical information
-- 🧠 **Full memory**: Goals, actions, reasoning process, results, and intermediate details — all retained
-- 🔄 **Model-agnostic**: Works with 64K, 128K, 1M context models; seamless switching between them
-- 📦 **Automatic backup**: Every compaction triggers trajectory export + SQLite indexing
-- 🔍 **FTS5 search**: Compressed sessions fully searchable via trigram index
-- 🛡️ **Triple coverage**: Manual, auto-compact, and watchdog — all paths protected
-- ⚡ **Deduplication**: 5-minute window prevents redundant backups
-- 🗓️ **Bounded retention**: the archive keeps a 30-day window by default (`--retention-days`, 1..3650) and purges expired chunks on every run; `INFINITY_CONTEXT_NO_ARCHIVE=1` disables archiving entirely
+| Step | Script | What happens |
+|------|--------|--------------|
+| Archive | `scripts/session_to_sqlite.py` | transcript (JSONL) → redacted chunks in a local SQLite DB with an FTS5 index |
+| Retrieve | `scripts/search.py` | read-only FTS5 search (trigram, with `LIKE` fallback for short CJK queries) |
+| Prune | `scripts/cleanup.py` | retention cleanup of archive files; dry-run by default |
+| Protect | `scripts/secure_fs.py` | owner-only permissions for the archive directory, database and WAL sidecars |
 
-### Quick Start
+> **File operations this package performs** (full detail in the disclosure table at the top of `SKILL.md`):
+>
+> | Operation | Tool | Guard |
+> |-----------|------|-------|
+> | Write redacted chunks into a local archive | `session_to_sqlite.py` | owner-only permissions, fail-closed |
+> | **Permanently delete** expired archive files | `cleanup.py` | archive marker + full-filename allowlist + non-recursive + `--apply --confirm-destructive` |
+> | Rewrite a file in place (redaction) | `session_to_sqlite.py --redact-file` | requires `--allow-dir`; symlink-resolved path must stay inside it |
+> | Move the archive when the path is not ASCII-safe | `session_to_sqlite.py` | **refused** unless `--allow-dir-fallback` is given |
+
+### Retention policy (read this once)
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Default retention | **30 days** | chunks older than 30 days are purged on every run, in the same transaction as the insert |
+| Configurable range | `1..3650` days | `--retention-days N` |
+| No time limit | **opt-in only** | `--retention-days 0` is rejected unless `--allow-unbounded-retention` is also given |
+| Manual pass | `--purge-only --output-dir <dir>` | applies the same policy to existing archives, without ingesting |
+| Off switch | `INFINITY_CONTEXT_NO_ARCHIVE=1` | the archiver writes nothing and returns `status: disabled` |
+
+Retention is enforced by code, not by documentation: every run deletes expired chunks from `session_chunks` and its FTS mirror and reports the count as `purged_chunks`.
+
+### Quick start (5 minutes)
+
+**Prerequisite: Python 3.9+.** No Node.js, no build step, no network access.
 
 ```bash
-# 1. Registry install (scanned artifact, no git, no build step)
+# 1. Install (registry — a scanned artifact)
 clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
 clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 
-# 2. From source: pin the reviewed release tag, then verify every file
+# 2. Archive a transcript
+python3 scripts/session_to_sqlite.py \
+  --session-key my-session \
+  --session-file ~/path/to/events.jsonl \
+  --output-dir ~/.infinity-context/archive
+
+# 3. Retrieve a detail later (read-only)
+python3 scripts/search.py --db ~/.infinity-context/archive/my-session-*.db --query "deployment token"
+
+# 4. Prune archive files (dry-run first)
+python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
+```
+
+**From source** — pin the reviewed tag and verify every byte:
+
+```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.1
-grep -q '^version: "1.8.1"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.2
+grep -q '^version: "1.8.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
-
-# 3. Optional OpenClaw compaction automation: see openclaw/README.md
-# 4. Restart your host (dsh: restart dsh; OpenClaw: openclaw gateway restart)
 ```
 
-### How It Works
+Then place the verified files into your skills directory exactly as listed in
+[`references/architecture.md`](references/architecture.md#file-layout) — the list is explicit, so no wildcard and no `cp -r` is ever needed.
 
-```
-Any compaction trigger (manual/auto/watchdog)
-  ├─ compact:before → backup + SQLite conversion
-  ├─ OpenClaw executes compression
-  └─ compact:after → enhanced summary generation
+### Where to install
 
-Deduplication: skip if backup exists within 5 minutes
-```
+| Host | Location | Notes |
+|------|----------|-------|
+| DeepSeek Harness (dsh) | `~/.agents/skills/infinity-context/` or `<project>/.agents/skills/infinity-context/` | a skill is one level deep (`<root>/<dir>/SKILL.md`); nested `**/SKILL.md` is deliberately not discovered |
+| OpenClaw | `<workspace>/skills/` (highest precedence) or `~/.openclaw/skills/` | discovered automatically |
+| Claude Code | `~/.claude/skills/infinity-context/` | same layout |
+| Cursor / Dify / Ollama / custom | point the agent at this folder | pure Python standard library |
 
 ### Requirements
 
-- **Any host that loads standard `SKILL.md` / Agent Skills** — DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama, or a custom agent. **OpenClaw is optional.**
-- Python 3.9+ (redaction engine + SQLite/FTS5 archive — the portable core)
-- PowerShell 5.1+ (Windows only, for the optional watchdog and compaction hook)
+- Any host that loads a standard `SKILL.md`: dsh, Claude Code, OpenClaw, Cursor, Dify, Ollama or a custom agent.
+- **Python 3.9+ only.** The core contains no JavaScript, no PowerShell, no subprocesses and no network code.
+- An optional OpenClaw/Windows integration lives in the **repository** under `openclaw/` and is **not** part of this package.
+
+### FAQ
+
+**Where is my data?** In the directory passed as `--output-dir` (default `~/.infinity-context/archive`): a SQLite database plus `-wal`/`-shm` sidecars, owner-only permissions.
+
+**How do I stop archiving completely?** Set `INFINITY_CONTEXT_NO_ARCHIVE=1`; the archiver writes nothing and returns `status: disabled`.
+
+**How do I keep less history?** `--retention-days 7` — expired chunks are deleted on the next run. `--purge-only --output-dir <dir>` applies it immediately without ingesting anything.
+
+**Is anything sent anywhere?** No. There is no network code in the package.
+
+**What about secrets in the transcript?** Redaction runs before anything is stored (API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers, emails). It is best-effort — treat the archive as sensitive data.
+
+**Why is my non-ASCII output path refused?** SQLite on Windows cannot use it. The run aborts with exit 8; `--allow-dir-fallback` moves the archive to `~/.openclaw/sqlite-data` and reports the change instead of doing it silently.
+
+### Issues & discussions
+
+- **Bug reports**: <https://github.com/Pondsi/infinitycontext/issues>
+- **Questions and ideas**: <https://github.com/Pondsi/infinitycontext/discussions>
 
 ### Sponsors
 
@@ -123,66 +176,116 @@ credited as the original author**. See [LICENSE](LICENSE).
 
 ### 这是什么？
 
-InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远完整——不溢出、不遗忘目标、不丢失任何细节。它是标准 `SKILL.md`，可运行在**任何支持 Agent Skills 的宿主**上，并**原生支持 DeepSeek Harness（dsh）**——放进 `.agents/skills/` 即被自动发现；同样支持 Claude Code、OpenClaw、Cursor、Dify、Ollama 及自研 Agent。
+InfinityContext 是一个**可移植的 AI 智能体技能**（标准 `SKILL.md` 包）：压缩上下文、把**脱敏后**的对话片段写入**本地** SQLite/FTS5 归档，并可按需精确检索任意早期细节。它可运行在**任何支持 Agent Skills 的宿主**上——**原生支持 DeepSeek Harness（dsh）**（放进 `.agents/skills/` 即被发现），同样支持 Claude Code、OpenClaw、Cursor、Dify、Ollama 及自研 Agent。
 
-> **核心承诺**：无论你使用 64K 还是 1M 上下文的模型，无论对话中切换模型，无论进行了多少轮交互——InfinityContext 确保智能体始终记得**要做什么**、**做过什么**、**怎么做的**，以及**每一个中间细节**。当你需要具体信息时，它知道**什么时候、在哪里、怎么查**。
+> **边界说明（说清楚）**：本包只包含可移植的 Python 核心——读取会话轨迹、写入本地归档、提供检索。**不联网、不调用 shell、不启动子进程、不常驻后台**。它对文件能做的全部操作，都列在 `SKILL.md` 顶部的能力披露表里。
 
-### 功能特性
+### 它做什么
 
-- 🔒 **永不遗忘**：多层压缩保持上下文在安全范围内，同时保留所有关键信息
-- 🧠 **完整记忆**：目标、行动、推理过程、结果、中间细节——全部保留
-- 🔄 **模型无关**：支持 64K、128K、1M 上下文模型；模型间无缝切换
-- 📦 **自动备份**：每次压缩触发轨迹导出 + SQLite 索引
-- 🔍 **FTS5 搜索**：压缩后的会话可通过三元组索引完整搜索
-- 🛡️ **三重覆盖**：手动、自动压缩、看门狗——所有路径受保护
-- ⚡ **去重机制**：5 分钟窗口避免重复备份
-- 🗓️ **保留期有界**：归档默认只保留 30 天（`--retention-days`，1..3650），每次运行清理过期片段；`INFINITY_CONTEXT_NO_ARCHIVE=1` 可彻底关闭归档
+| 步骤 | 脚本 | 说明 |
+|------|------|------|
+| 归档 | `scripts/session_to_sqlite.py` | 会话轨迹（JSONL）→ 脱敏片段写入本地 SQLite + FTS5 索引 |
+| 检索 | `scripts/search.py` | 只读 FTS5 搜索（三元组；短中文词回退 `LIKE`） |
+| 清理 | `scripts/cleanup.py` | 归档文件按保留期清理，默认演练模式 |
+| 保护 | `scripts/secure_fs.py` | 归档目录/数据库/WAL 旁文件强制 owner-only 权限 |
 
-### 快速开始
+> **本包会执行的文件操作**（完整披露见 `SKILL.md` 顶部表格）：
+>
+> | 操作 | 工具 | 约束 |
+> |------|------|------|
+> | 把脱敏片段写入本地归档 | `session_to_sqlite.py` | owner-only 权限，Fail-Closed |
+> | **永久删除**过期归档文件 | `cleanup.py` | 归档标记 + 完整文件名白名单 + 不递归 + `--apply --confirm-destructive` |
+> | 就地改写文件（脱敏） | `session_to_sqlite.py --redact-file` | 必须 `--allow-dir`；符号链接解析后的路径必须仍在范围内 |
+> | 路径非 ASCII 时移动归档 | `session_to_sqlite.py` | 默认**拒绝**，需显式 `--allow-dir-fallback` |
+
+### 保留期策略（看一次就够）
+
+| 设置 | 取值 | 说明 |
+|------|------|------|
+| 默认保留 | **30 天** | 每次运行都会在同一事务内清理超过 30 天的片段 |
+| 可配置范围 | `1..3650` 天 | `--retention-days N` |
+| 不限时间 | **必须显式开启** | `--retention-days 0` 会被拒绝，除非同时给出 `--allow-unbounded-retention` |
+| 手动清理 | `--purge-only --output-dir <目录>` | 对既有归档执行同一策略，不摄入新数据 |
+| 彻底关闭 | `INFINITY_CONTEXT_NO_ARCHIVE=1` | 归档器不写任何文件，返回 `status: disabled` |
+
+保留期是**代码强制**而非文档承诺：每次运行都会删除 `session_chunks` 及其 FTS 镜像中的过期片段，并在结果中返回 `purged_chunks`。
+
+### 快速上手（5 分钟）
+
+**前置条件：Python 3.9+**。不需要 Node.js、不需要构建、不需要联网。
 
 ```bash
-# 方式一：注册表安装（已扫描产物，无需 git、无需构建）
+# 1. 安装（注册表，已扫描产物）
 clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
 clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 
-# 方式二：源码安装——固定已发布 tag（必须等于 SKILL.md 的 version），并逐文件校验
+# 2. 归档一份会话轨迹
+python3 scripts/session_to_sqlite.py \
+  --session-key my-session \
+  --session-file ~/path/to/events.jsonl \
+  --output-dir ~/.infinity-context/archive
+
+# 3. 以后精确检索（只读）
+python3 scripts/search.py --db ~/.infinity-context/archive/my-session-*.db --query "部署令牌"
+
+# 4. 清理归档文件（先演练）
+python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
+```
+
+**源码安装**——固定已审计 tag 并逐文件校验：
+
+```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.1
-grep -q '^version: "1.8.1"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.2
+grep -q '^version: "1.8.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
-
-# 可选 OpenClaw 压缩自动化：见 openclaw/README.md
-# 重启宿主（dsh：重启 dsh；OpenClaw：openclaw gateway restart）
 ```
 
-### 工作原理
+随后按 [`references/architecture.md`](references/architecture.md#file-layout) 列出的文件清单逐文件放入技能目录——清单是显式的，不需要通配符，也不需要 `cp -r`。
 
-```
-任意压缩触发（手动/自动/看门狗）
-  ├─ compact:before → 备份 + SQLite 转换
-  ├─ OpenClaw 执行压缩
-  └─ compact:after → 增强摘要生成
+### 安装到哪
 
-去重机制：5 分钟内已有备份则跳过
-```
+| 宿主 | 位置 | 说明 |
+|------|------|------|
+| DeepSeek Harness（dsh） | `~/.agents/skills/infinity-context/` 或 `<项目>/.agents/skills/infinity-context/` | 技能是**一层深的目录包**（`<root>/<dir>/SKILL.md`）；嵌套 `**/SKILL.md` 故意不被发现 |
+| OpenClaw | `<工作区>/skills/`（优先级最高）或 `~/.openclaw/skills/` | 自动发现 |
+| Claude Code | `~/.claude/skills/infinity-context/` | 同样的目录结构 |
+| Cursor / Dify / Ollama / 自研 | 让 Agent 指向本目录 | 纯 Python 标准库 |
 
 ### 系统要求
 
-- **任意支持标准 `SKILL.md` / Agent Skills 的宿主**——DeepSeek Harness（dsh）、Claude Code、OpenClaw、Cursor、Dify、Ollama 或自研 Agent。**OpenClaw 不是必需的。**
-- Python 3.9+（脱敏引擎 + SQLite/FTS5 归档，可独立运行的核心）
-- PowerShell 5.1+（仅 Windows，用于可选看门狗与压缩钩子）
+- 任意支持标准 `SKILL.md` 的宿主：dsh、Claude Code、OpenClaw、Cursor、Dify、Ollama 或自研 Agent。
+- **只需 Python 3.9+**。核心**不含任何 JavaScript、PowerShell，不启动子进程，也没有网络代码**。
+- 可选的 OpenClaw/Windows 自动化（钩子 + 看门狗）位于**仓库** `openclaw/` 目录，**不属于本包**。
+
+### 常见问题
+
+**数据存在哪？** 在你传入的 `--output-dir`（默认 `~/.infinity-context/archive`）：一个 SQLite 数据库及其 `-wal`/`-shm` 旁文件，owner-only 权限。
+
+**怎么彻底停止归档？** 设置 `INFINITY_CONTEXT_NO_ARCHIVE=1`，归档器不写任何文件并返回 `status: disabled`。
+
+**怎么只保留更少历史？** `--retention-days 7`，下次运行即删除超期片段；`--purge-only --output-dir <目录>` 可立即执行且不摄入新数据。
+
+**数据会外传吗？** 不会。包内没有任何网络代码。
+
+**轨迹里的密钥怎么办？** 脱敏在写入之前完成（API Key、Token、密码、JWT、私钥、连接串、Cookie、Webhook、手机号、邮箱），但它是尽力而为——请把归档当作敏感数据。
+
+**为什么我的非 ASCII 路径被拒绝？** Windows 上的 SQLite 无法使用该路径。运行会以退出码 8 中止；`--allow-dir-fallback` 会把归档改到 `~/.openclaw/sqlite-data`，并如实上报，绝不静默改道。
+
+### 问题与讨论
+
+- **提交 Bug**：<https://github.com/Pondsi/infinitycontext/issues>
+- **提问与想法**：<https://github.com/Pondsi/infinitycontext/discussions>
 
 ### 安全与隐私
 
-- **纯本地**：无网络请求、无遥测、无云同步，数据只留在本机。
-- **压缩前先导出**：每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入本地 SQLite/FTS5 归档（可全文检索）。
-- **脱敏 + 数据最小化**：正则脱敏屏蔽 API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱，高熵内容不进索引；超长内容按 `MAX_ARCHIVE_LENGTH` 掐头去尾。
-- **Fail-Closed**：脱敏无法执行时直接销毁备份，绝不保留明文。
-- **权限与保留**：备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。
-- **清理需二次确认**：`cleanup.py` 只清理带 `.infinity-context-archive` 标记的目录，必须同时给出 `--apply --confirm-destructive`；通用 `.json`/`.tmp`/`.bak` 文件永不删除。
-- **默认不自动唤醒**：`enableAutoWake` 需显式开启；每轮最多发送一次经校验的「继续」指令，执行前先写 `WAKE_REQUEST` 日志；Agent 白名单默认拒绝。
-- **完整性校验**：压缩钩子执行前用 `integrity.json` 校验 `pipeline.ps1`。
+- **纯本地**：无网络请求、无遥测、无云同步。
+- **无 shell、无子进程**：核心脚本从不启动其它程序；Windows ACL 使用进程内 Win32 安全 API。
+- **归档仅本人可读，Fail-Closed**：POSIX `0700`/`0600`；Windows 受保护 DACL；加固后回读校验；无法强制 owner-only 时中止并销毁半成品（退出码 3）。
+- **脱敏 Fail-Closed**：规则启动期校验并预编译，任何失败都在建库之前中止；`session_key` 在生成任何路径/文件名之前先净化。
+- **保留期有界**：默认 30 天，范围 `1..3650`，无限期保留需显式 `--allow-unbounded-retention`。
+- **清理需二次确认**：`cleanup.py` 只清理带 `.infinity-context-archive` 标记的目录，必须同时给出 `--apply --confirm-destructive`，不递归，通用 `.json`/`.tmp`/`.bak` 永不删除。
 
 ### 许可证
 
@@ -199,7 +302,7 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 
 ### 功能特性
 
-- **三層防護**：配置層 → 管線層 → Hook 層 → 記憶層
+- **宿主無關**：可搭配宿主提供的任何壓縮流程（手動或自動）
 - **自動備份**：每次壓縮前導出完整軌跡
 - **SQLite + FTS5 搜尋**：壓縮後的會話可透過三元組索引搜尋
 - **去重機制**：5 分鐘視窗避免重複備份
@@ -217,7 +320,6 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 - **Fail-Closed**：去識別化無法執行時直接銷毀備份，絕不保留明文。
 - **權限與保留**：備份目錄 ACL 收緊為「目前使用者 + SYSTEM」，預設保留 30 天後自動清理。
 - **清理需二次確認**：`cleanup.py` 只清理帶 `.infinity-context-archive` 標記的目錄，必須同時給出 `--apply --confirm-destructive`；一般 `.json`/`.tmp`/`.bak` 檔案永不刪除。
-- **預設不自動喚醒**：`enableAutoWake` 需明確開啟；每輪最多發送一次經驗證的「繼續」指令，執行前先寫 `WAKE_REQUEST` 記錄；Agent 白名單預設拒絕。
 - **完整性校驗**：壓縮鉤子執行前以 `integrity.json` 校驗 `pipeline.ps1`。
 
 ### 許可證
@@ -256,7 +358,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-Closed**：秘匿化を実行できない場合はバックアップを破棄し、平文を残しません。
 - **権限と保持期間**：バックアップの ACL は「現在のユーザー + SYSTEM」に限定。既定で 30 日後に自動削除されます。
 - **削除には二段階の確認が必要**：`cleanup.py` は `.infinity-context-archive` マーカーのあるディレクトリだけを対象とし、`--apply --confirm-destructive` の同時指定を必須とします。汎用の `.json`/`.tmp`/`.bak` は決して削除しません。
-- **自動復帰は既定で無効**：`enableAutoWake` を明示的に有効化した場合のみ、1 ラウンドにつき検証済みの「続行」コマンドを 1 回だけ送信し、実行前に `WAKE_REQUEST` を記録します。Agent の許可リストは既定で拒否。
 - **完全性検証**：圧縮フックは実行前に `integrity.json` で `pipeline.ps1` を検証します。
 
 ### ライセンス
@@ -295,7 +396,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-Closed**: 마스킹을 실행할 수 없으면 백업을 파기하며 평문을 남기지 않습니다.
 - **권한 및 보존**: 백업 ACL은 "현재 사용자 + SYSTEM"으로 제한되며 기본 30일 후 자동 삭제됩니다.
 - **삭제에는 2단계 확인**: `cleanup.py`는 `.infinity-context-archive` 마커가 있는 디렉터리만 대상으로 하며 `--apply --confirm-destructive`를 함께 지정해야 합니다. 일반 `.json`/`.tmp`/`.bak` 파일은 절대 삭제하지 않습니다.
-- **자동 깨우기 기본 꺼짐**: `enableAutoWake`를 명시적으로 켠 경우에만 라운드당 검증된 "계속" 명령을 한 번 보내며, 실행 전에 `WAKE_REQUEST`를 기록합니다. Agent 허용 목록은 기본 거부입니다.
 - **무결성 검사**: 압축 훅은 실행 전에 `integrity.json`으로 `pipeline.ps1`을 검증합니다.
 
 ### 라이선스
@@ -334,7 +434,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-closed**: si la redacción no puede ejecutarse, la copia de seguridad se destruye; nunca se conserva en texto plano.
 - **Permisos y retención**: la ACL de las copias se limita al usuario actual + SYSTEM y se eliminan automáticamente a los 30 días por defecto.
 - **La limpieza exige doble confirmación**: `cleanup.py` solo actúa en directorios con el marcador `.infinity-context-archive` y requiere `--apply --confirm-destructive`; los archivos genéricos `.json`/`.tmp`/`.bak` nunca se borran.
-- **Reanudación automática desactivada por defecto**: `enableAutoWake` requiere activación explícita; envía un único comando de continuación validado por ronda y registra `WAKE_REQUEST` antes de ejecutarlo. La lista de agentes permitidos es de denegación por defecto.
 - **Verificación de integridad**: el hook de compactación verifica `pipeline.ps1` contra `integrity.json` antes de ejecutarlo.
 
 ### Licencia
@@ -373,7 +472,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-closed**: se a redação não puder ser executada, o backup é destruído; nunca é mantido em texto claro.
 - **Permissões e retenção**: a ACL dos backups é restrita ao usuário atual + SYSTEM e eles são removidos automaticamente após 30 dias por padrão.
 - **A limpeza exige dupla confirmação**: o `cleanup.py` só atua em diretórios com o marcador `.infinity-context-archive` e exige `--apply --confirm-destructive`; arquivos genéricos `.json`/`.tmp`/`.bak` nunca são apagados.
-- **Retomada automática desativada por padrão**: `enableAutoWake` exige ativação explícita; envia um único comando de continuação validado por rodada e registra `WAKE_REQUEST` antes de executar. A lista de agentes permitidos é de negação por padrão.
 - **Verificação de integridade**: o hook de compactação verifica `pipeline.ps1` contra `integrity.json` antes de executar.
 
 ### Licença
@@ -412,7 +510,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-closed** : si le masquage ne peut pas s'exécuter, la sauvegarde est détruite ; aucun texte en clair n'est conservé.
 - **Permissions et rétention** : l'ACL des sauvegardes est limitée à l'utilisateur courant + SYSTEM et elles sont supprimées automatiquement après 30 jours par défaut.
 - **Le nettoyage exige une double confirmation** : `cleanup.py` n'agit que sur les répertoires portant le marqueur `.infinity-context-archive` et exige `--apply --confirm-destructive` ; les fichiers génériques `.json`/`.tmp`/`.bak` ne sont jamais supprimés.
-- **Reprise automatique désactivée par défaut** : `enableAutoWake` doit être activé explicitement ; il envoie une seule commande de reprise validée par cycle et journalise `WAKE_REQUEST` avant exécution. La liste d'agents autorisés est en refus par défaut.
 - **Vérification d'intégrité** : le hook de compaction vérifie `pipeline.ps1` via `integrity.json` avant exécution.
 
 ### Licence
@@ -451,7 +548,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-Closed**: Kann die Redaktion nicht ausgeführt werden, wird das Backup vernichtet; Klartext wird nie behalten.
 - **Rechte und Aufbewahrung**: Die ACL der Backups ist auf aktuellen Benutzer + SYSTEM beschränkt; sie werden standardmäßig nach 30 Tagen gelöscht.
 - **Löschen erfordert doppelte Bestätigung**: `cleanup.py` arbeitet nur in Verzeichnissen mit der Markierung `.infinity-context-archive` und verlangt `--apply --confirm-destructive`; generische `.json`/`.tmp`/`.bak`-Dateien werden nie gelöscht.
-- **Automatisches Wiederaufnehmen standardmäßig aus**: `enableAutoWake` muss ausdrücklich aktiviert werden; es wird pro Runde genau ein geprüfter Fortsetzungsbefehl gesendet und vorher `WAKE_REQUEST` protokolliert. Die Agent-Allowlist ist standardmäßig deny-by-default.
 - **Integritätsprüfung**: Der Compaction-Hook prüft `pipeline.ps1` vor der Ausführung gegen `integrity.json`.
 
 ### Lizenz
@@ -490,7 +586,6 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 - **Fail-Closed**: если редактирование невозможно, резервная копия уничтожается; открытый текст не сохраняется.
 - **Права и хранение**: ACL резервных копий ограничен текущим пользователем + SYSTEM; по умолчанию они удаляются через 30 дней.
 - **Удаление требует двойного подтверждения**: `cleanup.py` работает только в каталогах с маркером `.infinity-context-archive` и требует `--apply --confirm-destructive`; обычные файлы `.json`/`.tmp`/`.bak` не удаляются никогда.
-- **Автовозобновление отключено по умолчанию**: `enableAutoWake` включается явно; за один цикл отправляется одна проверенная команда продолжения, перед выполнением пишется `WAKE_REQUEST`. Список разрешённых агентов по умолчанию запрещает всё.
 - **Проверка целостности**: хук сжатия проверяет `pipeline.ps1` по `integrity.json` перед выполнением.
 
 ### Лицензия
@@ -500,19 +595,23 @@ Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ## Security / 安全模型
 
-**Deny by Default — no privileged operation runs unless it was explicitly authorized.**
+**Fail-closed by default — nothing is written when a safety check cannot be enforced.**
 
-- **Agent allowlist**: only agents listed in `INFINITY_CONTEXT_AGENTS`, `%LOCALAPPDATA%\.openclaw\infinity-context.config.json` (`{"allowedAgents":["main"]}`), or the built-in default `main` are ever read or compacted. An empty list **aborts**; it never degrades to allow-all. The `~/.openclaw/agents` directory is not enumerated.
-- **Cleanup script**: `cleanup-old-backups.ps1` validates retention days (`1..3650`), anchors the target path to `%LOCALAPPDATA%\.openclaw\backups`, allows only backup file extensions, skips symlinks/junctions, and supports `-WhatIf`.
-- **No shell interpolation**: session keys are validated against a strict pattern before any `openclaw` invocation; no `powershell -Command` string building.
-- **No auto-wake by default**: `$EnableAutoWake = $false`; enabling it is an explicit opt-in.
+- **Local only**: no network code, no telemetry, no MCP, no cloud sync anywhere in the package.
+- **No shell, no subprocesses**: the four Python scripts never start another program; Windows ACL hardening uses in-process Win32 security APIs.
+- **Owner-only archive, fail-closed**: the archive directory is forced to `0700` and files to `0600` (POSIX) or a protected DACL (Windows); the result is re-read to prove it took effect. If owner-only access cannot be enforced, archiving aborts and the half-written database is destroyed (exit 3). `--allow-insecure-storage` is the only opt-out and is reported as `insecure_storage: true`.
+- **Fail-closed redaction**: rules are validated and precompiled at startup; a malformed rule file aborts before any database is created. `session_key` is sanitised before it is used for any path or filename.
+- **Bounded retention**: 30 days by default, `--retention-days 1..3650`; unlimited retention requires the explicit `--allow-unbounded-retention` flag; `INFINITY_CONTEXT_NO_ARCHIVE=1` disables archiving entirely.
+- **Deny-by-default filesystem rules**: `cleanup.py` refuses a directory without the `.infinity-context-archive` marker, deletes only full filenames matching InfinityContext artifacts, never recurses, re-checks every candidate with `lstat`, and does nothing without `--apply --confirm-destructive`.
 
-**默认拒绝 — 任何特权操作都必须先被显式授权，否则不执行。**
+**默认拒绝 — 任何安全检查无法强制执行时，直接中止而不是降级。**
 
-- **Agent 白名单**：只有 `INFINITY_CONTEXT_AGENTS`、`%LOCALAPPDATA%\.openclaw\infinity-context.config.json`（`{"allowedAgents":["main"]}`）或内置默认值 `main` 中列出的 Agent 会被读取或压缩。白名单为空时**直接阻断**，绝不降级为“全部允许”；不再枚举 `~/.openclaw/agents` 目录。
-- **清理脚本**：`cleanup-old-backups.ps1` 校验保留天数（`1..3650`）、将目标路径锚定在 `%LOCALAPPDATA%\.openclaw\backups` 之内、仅允许备份类扩展名、跳过符号链接/Junction，并支持 `-WhatIf` 预演。
-- **无 shell 拼接**：调用 `openclaw` 前先对 session key 做严格正则校验，不使用 `powershell -Command` 字符串拼接。
-- **默认不自动唤醒**：`$EnableAutoWake = $false`，开启需显式授权。
+- **纯本地**：包内没有任何网络代码、遥测、MCP 或云同步。
+- **无 shell、无子进程**：四个 Python 脚本从不启动其它程序；Windows ACL 使用进程内 Win32 安全 API。
+- **归档仅本人可读，Fail-Closed**：POSIX `0700`/`0600`，Windows 受保护 DACL，并回读校验；无法强制时中止并销毁半成品（退出码 3）。唯一例外是 `--allow-insecure-storage`，且结果中会标记 `insecure_storage: true`。
+- **脱敏 Fail-Closed**：规则启动期校验并预编译，规则文件损坏会在建库前中止；`session_key` 在生成任何路径/文件名之前先净化。
+- **保留期有界**：默认 30 天，`--retention-days 1..3650`；无限期保留需显式 `--allow-unbounded-retention`；`INFINITY_CONTEXT_NO_ARCHIVE=1` 可彻底关闭归档。
+- **默认拒绝的文件系统规则**：`cleanup.py` 拒绝没有 `.infinity-context-archive` 标记的目录，只删除完整文件名匹配本应用产物的文件，不递归，删除前用 `lstat` 复核，且必须同时给出 `--apply --confirm-destructive`。
 
 ## 隐私声明 / Privacy Statement
 

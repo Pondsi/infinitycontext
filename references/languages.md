@@ -17,7 +17,6 @@ same host support as the English section.
 
 小模型（128K 上下文）一次深度思考就可能耗盡視窗。InfinityContext 透過多層防護確保對話永不中斷：
 
-1. **配置層**：`keepRecentTokens=15000` + 看門狗閾值 35%
 2. **管線層**：自動備份 → SQLite → 壓縮 → 喚醒
 3. **Hook 層**：`compaction-pipeline` hook 攔截所有壓縮路徑
 4. **記憶層**：MEMORY.md 精簡 + FTS5 按需檢索
@@ -86,7 +85,6 @@ MIT 라이선스 — 자세한 내용은 [LICENSE](../LICENSE)를 참조하세�
 
 Los modelos pequeños (128K de contexto) pueden agotar su ventana en un solo turno de pensamiento profundo. InfinityContext proporciona varias capas de protección:
 
-1. **Capa de Configuración**: `keepRecentTokens=15000` + umbral del watchdog al 35%
 2. **Capa de Pipeline**: Backup automático → SQLite → compresión → activación
 3. **Capa de Hook**: El hook `compaction-pipeline` intercepta todas las rutas de compresión
 4. **Capa de Memoria**: MEMORY.md optimizado + búsqueda FTS5 bajo demanda
@@ -109,7 +107,6 @@ Licencia MIT — ver [LICENSE](../LICENSE).
 
 Modelos pequenos (128K de contexto) podem esgotar sua janela em um único turno de pensamento profundo. Fornece várias camadas de proteção:
 
-1. **Camada de Configuração**: `keepRecentTokens=15000` + limiar do watchdog em 35%
 2. **Camada de Pipeline**: Backup automático → SQLite → compressão → ativação
 3. **Camada de Hook**: O hook `compaction-pipeline` intercepta todos os caminhos de compressão
 4. **Camada de Memória**: MEMORY.md otimizado + busca FTS5 sob demanda
@@ -132,7 +129,6 @@ Licença MIT — ver [LICENSE](../LICENSE).
 
 Les petits modèles (128K de contexte) peuvent épuiser leur fenêtre en un seul tour de réflexion profonde. Fournit plusieurs couches de protection :
 
-1. **Couche de Configuration** : `keepRecentTokens=15000` + seuil du watchdog à 35%
 2. **Couche de Pipeline** : Sauvegarde automatique → SQLite → compression → réveil
 3. **Couche de Hook** : Le hook `compaction-pipeline` intercepte tous les chemins de compression
 4. **Couche de Mémoire** : MEMORY.md optimisé + recherche FTS5 à la demande
@@ -155,7 +151,6 @@ Licence MIT — voir [LICENSE](../LICENSE).
 
 Kleine Modelle (128K Kontext) können ihr Fenster in einer einzigen Tiefdenk-Runde erschöpfen. Bietet mehrere Schutzschichten:
 
-1. **Konfigurationsschicht**: `keepRecentTokens=15000` + Watchdog-Schwelle bei 35%
 2. **Pipeline-Schicht**: Automatisches Backup → SQLite → Kompression → Aufwecken
 3. **Hook-Schicht**: Der `compaction-pipeline`-Hook fängt alle Kompressionswege ab
 4. **Speicherschicht**: MEMORY.md optimiert + FTS5-Abfrage bei Bedarf

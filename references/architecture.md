@@ -42,8 +42,8 @@ than `--retention-days` (default **30**, range `1..3650`) from `session_chunks` 
 mirror inside the same transaction as the insert, and reports the count as `purged_chunks`.
 `--purge-only --output-dir <dir>` applies the same policy to existing archives without
 ingesting; it requires the archive marker and skips any database lacking both
-`session_chunks` and `chunk_fts`. `--retention-days 0` keeps chunks forever but is rejected
-unless `--allow-unbounded-retention` is also given. Setting `INFINITY_CONTEXT_NO_ARCHIVE=1`
+`session_chunks` and `chunk_fts`. `--retention-days 0` disables time-based purging, but it is
+rejected unless `--allow-unbounded-retention` is also given. Setting `INFINITY_CONTEXT_NO_ARCHIVE=1`
 disables archiving entirely — the script writes no file and returns `status: disabled`.
 
 ### Data model

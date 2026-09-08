@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.8.1"
+  version: "1.8.2"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -36,7 +36,7 @@ metadata:
 > capabilities.**
  — portable context compression & memory archive
 
-> Keep any model running indefinitely: compress context, archive every chunk locally, retrieve exact details later.
+> Keep long sessions usable: compress context, archive redacted chunks locally inside a bounded retention window, retrieve exact details later.
 
 Works out of the box on **DeepSeek Harness (dsh)** and **OpenClaw**, and on any
 host that loads a standard `SKILL.md`.
@@ -59,8 +59,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.1
-grep -q '^version: "1.8.1"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.2
+grep -q '^version: "1.8.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 ```
@@ -137,7 +137,7 @@ tell the user that the conversation will be stored locally in a searchable archi
 obtain explicit confirmation. Do not archive silently. When a user asks to stop keeping
 history, set `INFINITY_CONTEXT_NO_ARCHIVE=1` (the archiver then writes nothing) and run
 `cleanup.py --apply --confirm-destructive` — or delete the archive directory. Retention is
-bounded by default (30 days), so history does not accumulate indefinitely.
+bounded by default (30 days), so history stays inside a known window.
 
 ## Security & privacy
 

@@ -3,6 +3,30 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.2 — 2026-09-09
+
+Documentation accuracy pass, driven by the ClawHub review of 1.8.1.
+
+### Fixed
+- **Retention wording is consistent everywhere.** The marketing claim that conversations are kept
+  "forever" (and the Chinese equivalent) is gone. Every document now states the same policy:
+  30 days by default, configurable `1..3650` days, no time limit only with the explicit
+  `--allow-unbounded-retention` flag, `--purge-only` for a manual pass, and
+  `INFINITY_CONTEXT_NO_ARCHIVE=1` to stop archiving.
+- **No capability is claimed for code that is not in the package.** Mentions of the OpenClaw
+  auto-wake / continuation behaviour and of the watchdog pipeline were removed from
+  `README.md`, `说明.md`, `SKILL.md` and `references/languages.md`. Those components live only in
+  the repository's `openclaw/` folder, which is outside the published artifact; the published
+  docs now describe the portable core only.
+
+### Changed
+- `README.md`: the English and Simplified Chinese sections are rewritten around a 5-minute
+  quick start, a "what it does" table, an explicit retention table, a FAQ, and Issues /
+  Discussions links. The security section now describes only the published core.
+- `说明.md`: rewritten end to end for the portable core (install, quick start, retention,
+  security, data model, FAQ, limitations), with a single pointer to the repository integration.
+- `references/languages.md`: watchdog references removed.
+
 ## 1.8.1 — 2026-09-09
 
 Packaging boundary fix found by the ClawHub review of 1.8.0.
