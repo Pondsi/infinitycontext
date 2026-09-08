@@ -1,0 +1,86 @@
+const { spawn } = require('child_process');
+const path = require('path');
+const os = require('os');
+
+/**
+ * Compaction Pipeline Hook
+ * Runs backup/SQLite/enhanced-summary around every compaction event.
+ *
+ * Before compaction: export trajectory → convert to SQLite (preserves full history)
+ * After compaction:  run enhanced summary on SQLite DB
+ */
+
+const PIPELINE_SCRIPT = path.join(
+    os.homedir(), '.openclaw', 'hooks', 'compaction-pipeline', 'pipeline.ps1'
+);
+
+const LOG_FILE = path.join(
+    os.homedir(), '.openclaw', 'logs', 'compaction-pipeline.log'
+);
+
+function log(msg) {
+    const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const line = `${ts} ${msg}\n`;
+    try {
+        require('fs').appendFileSync(LOG_FILE, line, 'utf8');
+    } catch (_) {}
+}
+
+function runPipeline(sessionKey, phase) {
+    if (!sessionKey) {
+        log(`HOOK_${phase.toUpperCase()}: skipped (no sessionKey)`);
+        return;
+    }
+
+    log(`HOOK_${phase.toUpperCase()}: triggering for ${sessionKey}`);
+
+    try {
+        const child = spawn('powershell.exe', [
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', PIPELINE_SCRIPT,
+            '-SessionKey', sessionKey,
+            '-Phase', phase
+        ], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true
+        });
+
+        child.unref();
+
+        child.on('error', (err) => {
+            log(`HOOK_${phase.toUpperCase()}_SPAWN_ERR: ${sessionKey} ${err.message}`);
+        });
+
+        child.on('exit', (code) => {
+            log(`HOOK_${phase.toUpperCase()}_EXIT: ${sessionKey} code=${code}`);
+        });
+    } catch (err) {
+        log(`HOOK_${phase.toUpperCase()}_EXCEPTION: ${sessionKey} ${err.message}`);
+    }
+}
+
+const handler = async (event) => {
+    try {
+        const context = event.context || {};
+        const sessionKey = context.sessionKey;
+
+        if (event.type === 'session' && event.action === 'compact:before') {
+            runPipeline(sessionKey, 'before');
+            return;
+        }
+
+        if (event.type === 'session' && event.action === 'compact:after') {
+            runPipeline(sessionKey, 'after');
+            return;
+        }
+    } catch (error) {
+        log(`HOOK_HANDLER_ERR: ${error instanceof Error ? error.message : String(error)}`);
+    }
+};
+
+module.exports = handler;
+module.exports.default = handler;
+module.exports.handler = handler;
+module.exports.__esModule = true;
