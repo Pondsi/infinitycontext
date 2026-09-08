@@ -12,11 +12,8 @@ param(
 $ErrorActionPreference = 'Continue'
 # ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
 function Get-PythonExe {
+    # T07：不做 PATH 搜索，只扫标准安装位置与注册表
     $cands = New-Object System.Collections.ArrayList
-    foreach ($n in @('python3','python','py')) {
-        $cmd = Get-Command $n -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
-    }
     foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
         Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
     }
@@ -58,6 +55,69 @@ foreach ($d in @((Split-Path $LogFile -Parent), "$env:LOCALAPPDATA\.openclaw\bac
 function Write-Log($msg) {
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     "$ts $msg" | Out-File -Append -FilePath $LogFile -Encoding UTF8
+}
+
+# ===== T07 安全修复：受信任可执行文件解析（绝不搜索 PATH）=====
+function Resolve-TrustedExe {
+    param([string[]]$Candidates, [string]$Label)
+    foreach ($c in $Candidates) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { return (Resolve-Path -LiteralPath $c).Path }
+    }
+    Write-Log "EXE_NOT_FOUND: $Label"
+    return $null
+}
+$script:System32 = Join-Path $env:SystemRoot 'System32'
+$script:ExeIcacls = Resolve-TrustedExe -Candidates @((Join-Path $script:System32 'icacls.exe')) -Label 'icacls.exe'
+$script:ExeTaskkill = Resolve-TrustedExe -Candidates @((Join-Path $script:System32 'taskkill.exe')) -Label 'taskkill.exe'
+# 收紧进程 PATH，使任何遗漏的子调用也无法被劫持
+$env:PATH = "$script:System32;$env:SystemRoot"
+
+function Resolve-OpenClawInvoker {
+    if ($script:OpenClawInvokerResolved) { return $script:OpenClawInvoker }
+    $script:OpenClawInvokerResolved = $true
+    $nodeCandidates = @(
+        (Join-Path $env:ProgramFiles 'nodejs\node.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'nodejs\node.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')
+    )
+    $mjsCandidates = @(
+        $env:INFINITY_CONTEXT_OPENCLAW_MJS,
+        (Join-Path $env:APPDATA 'npm\node_modules\openclaw\openclaw.mjs'),
+        (Join-Path $env:ProgramFiles 'nodejs\node_modules\openclaw\openclaw.mjs'),
+        (Join-Path $env:LOCALAPPDATA 'npm-global\node_modules\openclaw\openclaw.mjs'),
+        'C:\npm-global\node_modules\openclaw\openclaw.mjs'
+    )
+    $nodeExe = Resolve-TrustedExe -Candidates $nodeCandidates -Label 'node.exe'
+    if ($nodeExe) {
+        foreach ($c in $mjsCandidates) {
+            if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) {
+                $script:OpenClawInvoker = @{ File = $nodeExe; Args = @((Resolve-Path -LiteralPath $c).Path) }
+                return $script:OpenClawInvoker
+            }
+        }
+        Write-Log 'OPENCLAW_MJS_NOT_FOUND: set INFINITY_CONTEXT_OPENCLAW_MJS'
+    }
+    return $null
+}
+
+# 运行 OpenClaw CLI 并捕获输出（绝对路径 + 参数数组，无 shell 解释）
+function Invoke-OpenClawCli {
+    param([string[]]$CliArgs, [int]$TimeoutSec = 300)
+    $inv = Resolve-OpenClawInvoker
+    if (-not $inv) { Write-Log 'OPENCLAW_NOT_FOUND'; return '' }
+    $outFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs) -WindowStyle Hidden -PassThru `
+             -RedirectStandardOutput $outFile -RedirectStandardError "$outFile.err" -ErrorAction Stop
+        if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+            if ($script:ExeTaskkill) { & $script:ExeTaskkill /PID $p.Id /T /F 2>&1 | Out-Null }
+        }
+        return (Get-Content -LiteralPath $outFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
+    } catch { Write-Log "OPENCLAW_CLI_ERR: $_"; return '' }
+    finally {
+        Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$outFile.err" -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # ===== T05 安全合规：默认拒绝（Deny by Default）=====
@@ -107,8 +167,9 @@ $AllowUnredactedBackup = $false     # 显式 opt-in：仅在需要完整灾难�
 function Protect-BackupAcl([string]$Path) {
     try {
         if (-not (Test-Path -LiteralPath $Path)) { return }
+        if (-not $script:ExeIcacls) { Write-Log 'ACL_SKIP: icacls not found in System32'; return }
         $me = "$env:USERDOMAIN\$env:USERNAME"
-        & icacls $Path /inheritance:r /grant:r "${me}:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 2>&1 | Out-Null
+        & $script:ExeIcacls $Path /inheritance:r /grant:r "${me}:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 2>&1 | Out-Null
     } catch { Write-Log "ACL_ERR: $Path $_" }
 }
 
@@ -129,6 +190,7 @@ function Remove-ExpiredBackups {
 function Resolve-RedactorScript {
     $cands = @(
         (Join-Path $ScriptDir 'session_to_sqlite.py'),
+        (Join-Path $ScriptDir '..\scripts\session_to_sqlite.py'),
         (Join-Path $env:USERPROFILE '.openclaw\scripts\session_to_sqlite.py')
     )
     foreach ($c in $cands) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
@@ -177,7 +239,7 @@ function Export-Trajectory($key) {
         $metaRaw = ''
         # T05 安全修复：仅查询已授权的 Agent（不再枚举 agents 目录）
         $metaAll = New-Object System.Collections.ArrayList
-        $mj = & openclaw sessions list --json --agent $AgentId 2>&1 | Out-String
+        $mj = Invoke-OpenClawCli -CliArgs @('sessions', 'list', '--json', '--agent', $AgentId)
         if ($mj) { try { $mp = $mj | ConvertFrom-Json; foreach ($ms in @($mp.sessions)) { [void]$metaAll.Add($ms) } } catch {} }
         $metaRaw = (@{ sessions = @($metaAll) } | ConvertTo-Json -Depth 12 -Compress) -replace '[\u0000-\u0008\u000B\u000C\u000E-\u001F]', ''
         $meta = $metaRaw | ConvertFrom-Json
@@ -192,7 +254,7 @@ function Export-Trajectory($key) {
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $relativeOutput = "hook-backup-$safe-$stamp"
 
-        $exportResult = & openclaw sessions export-trajectory --session-key $key --agent $sess.agentId --json --output $relativeOutput 2>&1 | Out-String
+        $exportResult = Invoke-OpenClawCli -CliArgs @('sessions', 'export-trajectory', '--session-key', $key, '--agent', $sess.agentId, '--json', '--output', $relativeOutput)
         $exportData = $exportResult | ConvertFrom-Json
 
         if ($exportData -and $exportData.outputDir) {

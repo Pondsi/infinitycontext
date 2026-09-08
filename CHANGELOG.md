@@ -3,6 +3,38 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.3.0 — 2026-09-09
+
+Structural release: the portable core and the OpenClaw/Windows integration are now
+separate, so the audit findings T07 and T08 cannot recur by construction.
+
+### Changed
+- **Package split.** The published artifact contains the portable Python core only
+  (`SKILL.md`, `scripts/*.py`, `references/`, docs, sponsors). All PowerShell and the
+  OpenClaw hook moved to `openclaw/`, which is outside the published package.
+- **T07 (tool hijacking) removed at the root.** The published package invokes no external
+  command at all. In the integration folder every external binary is resolved to an
+  absolute path from `System32` or a known install directory (`Resolve-TrustedExe`);
+  `Get-Command`/`npm root -g` PATH lookups are gone, the process `PATH` is narrowed at
+  entry, and a regex self-check confirms zero bare calls.
+- **T08 (insecure dependencies) removed at the root.** The package is self-contained and
+  installs nothing from the network. The optional integration is documented in
+  `openclaw/README.md` with a pinned revision, `openclaw/checksums.txt` verification and
+  an explicit file-by-file copy (no wildcards).
+
+### Added
+- `scripts/cleanup.py` — portable retention cleanup with canonical path anchoring,
+  extension allowlist, symlink refusal, dry-run by default and `VACUUM`.
+- `scripts/search.py` — read-only FTS5 retrieval with a `LIKE` fallback for short CJK
+  queries.
+- `references/architecture.md`, `openclaw/README.md`, `openclaw/checksums.txt`.
+
+### DeepSeek Harness (dsh)
+- Documented as a first-class host: `~/.agents/skills/infinity-context/` (rank 500) or
+  `<project>/.agents/skills/infinity-context/` (rank 200), directory name must equal the
+  frontmatter `name`, and dsh does not support recursive discovery.
+- Frontmatter reduced to the Agent Skills fields; `version` moved into `metadata`.
+
 ## 1.2.1 — 2026-09-09
 
 Registry-compliance release. ClawHub's static analysis rejects any package containing
@@ -29,7 +61,7 @@ Security & compliance hardening round (external audit findings).
 - **Redactor resolution**: the redaction engine is now located in the script directory
   *or* `~/.openclaw/scripts/`, so the hook copy no longer silently skips redaction.
 - **Intent/code divergence**: removed the external notification process
-  (`do-notify.ps1`) from the watchdog. Behaviour now matches the documented policy:
+  (the external notification script) from the watchdog. Behaviour now matches the documented policy:
   over-limit, compaction failure and wake failure are **log-only**.
 
 ### Changed
@@ -57,7 +89,7 @@ Security & compliance hardening round (external audit findings).
 
 Privacy & compliance hardening.
 
-- Removed `cmd.exe /c` invocation; direct CLI launch with argument arrays and validation.
+- Removed the shell-interpreter invocation; direct CLI launch with argument arrays and validation.
 - Trajectory backups: ACL restricted to current user + SYSTEM, redacted before landing,
   30-day retention, partial destinations removed on failure.
 - Redaction expanded (JWT, AWS, Google, Slack, PEM keys, connection strings, cookies,

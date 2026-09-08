@@ -1,4 +1,4 @@
-# InfinityContext
+﻿# InfinityContext
 
 **Open-Source Context Compression & Memory Optimization for AI Agents — DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama and any Agent Skills host**
 
@@ -53,11 +53,11 @@ InfinityContext is a **universal AI agent skill** that keeps your conversations 
 # 1. Clone the repository
 git clone https://github.com/Pondsi/infinitycontext.git
 
-# 2. Copy scripts to OpenClaw
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+# 2. Install the portable core (dsh / Claude Code)
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 
-# 3. Update openclaw.json (see SKILL.md for full config)
+# 3. Optional OpenClaw automation: see openclaw/README.md
 
 # 4. Restart gateway
 openclaw gateway restart
@@ -114,11 +114,11 @@ InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远�
 # 1. 克隆仓库
 git clone https://github.com/Pondsi/infinitycontext.git
 
-# 2. 复制脚本到 OpenClaw
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+# 2. 安装可移植核心（dsh / Claude Code）
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 
-# 3. 更新 openclaw.json（完整配置见 SKILL.md）
+# 3. 可选 OpenClaw 自动化：见 openclaw/README.md
 
 # 4. 重启 Gateway
 openclaw gateway restart
@@ -165,8 +165,8 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -193,8 +193,8 @@ InfinityContext は、小規模モデル（128K コンテキスト）のコン�
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -221,8 +221,8 @@ InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -249,8 +249,8 @@ InfinityContext es un Skill de OpenClaw que previene el desbordamiento de contex
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -277,8 +277,8 @@ InfinityContext é um Skill do OpenClaw que previne o transbordamento de context
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -305,8 +305,8 @@ InfinityContext est un Skill OpenClaw qui empêche le débordement de contexte d
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -333,8 +333,8 @@ InfinityContext ist ein OpenClaw-Skill, der Kontext-Überlauf in kleinen Modelle
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 
@@ -361,8 +361,8 @@ InfinityContext — это навык OpenClaw, предотвращающий �
 
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
-cp scripts/* ~/.openclaw/scripts/
-cp src/* ~/.openclaw/hooks/compaction-pipeline/
+mkdir -p ~/.agents/skills/infinity-context
+cp -r scripts references SKILL.md ~/.agents/skills/infinity-context/
 openclaw gateway restart
 ```
 

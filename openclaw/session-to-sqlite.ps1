@@ -49,7 +49,17 @@ $PyExe = Get-PythonExe
 $pythonExe = $PyExe
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$pyScript = Join-Path $scriptDir "session_to_sqlite.py"
+# T07/重构修复：按候选位置解析引擎（脚本同目录 / 仓库 scripts / 安装目录），绝不搜索 PATH
+$pyCandidates = @(
+    (Join-Path $scriptDir 'session_to_sqlite.py'),
+    (Join-Path $scriptDir '..\scripts\session_to_sqlite.py'),
+    (Join-Path $env:USERPROFILE '.openclaw\scripts\session_to_sqlite.py')
+)
+$pyScript = $null
+foreach ($c in $pyCandidates) {
+    if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { $pyScript = (Resolve-Path -LiteralPath $c).Path; break }
+}
+if (-not $pyScript) { Write-Error 'ENGINE_NOT_FOUND: session_to_sqlite.py'; exit 1 }
 
 $argsList = @($pyScript, '--session-key', $SessionKey, '--session-file', $SessionFile, '--output-dir', $OutputDir)
 if ($AppendMode) { $argsList += '--append' }

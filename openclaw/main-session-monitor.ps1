@@ -40,11 +40,8 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
 # ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
 function Get-PythonExe {
+    # T07：不做 PATH 搜索，只扫标准安装位置与注册表
     $cands = New-Object System.Collections.ArrayList
-    foreach ($n in @('python3','python','py')) {
-        $cmd = Get-Command $n -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
-    }
     foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
         Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
     }
@@ -75,35 +72,64 @@ $PyExe = Get-PythonExe
 $script:OpenClawInvoker = $null
 $script:OpenClawInvokerResolved = $false
 
+# T07 安全修复：受信任可执行文件解析（绝不搜索 PATH，绝不回退到裸命令名）
+function Resolve-TrustedExe {
+    param([string[]]$Candidates, [string]$Label)
+    foreach ($c in $Candidates) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { return (Resolve-Path -LiteralPath $c).Path }
+    }
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log "EXE_NOT_FOUND: $Label" }
+    return $null
+}
+
 function Resolve-OpenClawInvoker {
     if ($script:OpenClawInvokerResolved) { return $script:OpenClawInvoker }
     $script:OpenClawInvokerResolved = $true
-    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
-    $candidates = New-Object System.Collections.ArrayList
 
-    $oc = Get-Command openclaw -ErrorAction SilentlyContinue
-    if ($oc -and $oc.Source) {
-        $shimDir = Split-Path $oc.Source -Parent
-        [void]$candidates.Add((Join-Path $shimDir 'node_modules\openclaw\openclaw.mjs'))
-        [void]$candidates.Add((Join-Path $shimDir '..\node_modules\openclaw\openclaw.mjs'))
-    }
-    try {
-        $npmRoot = (& npm root -g 2>$null | Out-String).Trim()
-        if ($npmRoot) { [void]$candidates.Add((Join-Path $npmRoot 'openclaw\openclaw.mjs')) }
-    } catch {}
-    [void]$candidates.Add('C:\npm-global\node_modules\openclaw\openclaw.mjs')
+    $nodeCandidates = @(
+        (Join-Path $env:ProgramFiles 'nodejs\node.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'nodejs\node.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')
+    )
+    $mjsCandidates = @(
+        $env:INFINITY_CONTEXT_OPENCLAW_MJS,
+        (Join-Path $env:APPDATA 'npm\node_modules\openclaw\openclaw.mjs'),
+        (Join-Path $env:ProgramFiles 'nodejs\node_modules\openclaw\openclaw.mjs'),
+        (Join-Path $env:LOCALAPPDATA 'npm-global\node_modules\openclaw\openclaw.mjs'),
+        'C:\npm-global\node_modules\openclaw\openclaw.mjs'
+    )
 
-    if ($nodeExe -and (Test-Path -LiteralPath $nodeExe)) {
-        foreach ($c in $candidates) {
-            if ($c -and (Test-Path -LiteralPath $c)) {
-                $script:OpenClawInvoker = @{ File = $nodeExe; Args = @($c) }
+    $nodeExe = Resolve-TrustedExe -Candidates $nodeCandidates -Label 'node.exe'
+    if ($nodeExe) {
+        foreach ($c in $mjsCandidates) {
+            if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) {
+                $script:OpenClawInvoker = @{ File = $nodeExe; Args = @((Resolve-Path -LiteralPath $c).Path) }
                 return $script:OpenClawInvoker
             }
         }
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log 'OPENCLAW_MJS_NOT_FOUND: set INFINITY_CONTEXT_OPENCLAW_MJS to the openclaw.mjs path' }
     }
-    # 回退：直接使用 openclaw 命令名（仍为参数数组，无 shell 拼接）
-    if ($oc -and $oc.Source) { $script:OpenClawInvoker = @{ File = $oc.Source; Args = @() }; return $script:OpenClawInvoker }
     return $null
+}
+
+# 运行 OpenClaw CLI 并捕获输出（绝对路径 + 参数数组，无 shell 解释）
+function Invoke-OpenClawCli {
+    param([string[]]$CliArgs, [int]$TimeoutSec = 180)
+    $inv = Resolve-OpenClawInvoker
+    if (-not $inv) { Write-Log 'OPENCLAW_NOT_FOUND'; return '' }
+    $outFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs) -WindowStyle Hidden -PassThru `
+             -RedirectStandardOutput $outFile -RedirectStandardError "$outFile.err" -ErrorAction Stop
+        if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+            if ($script:ExeTaskkill) { & $script:ExeTaskkill /PID $p.Id /T /F 2>&1 | Out-Null }
+        }
+        return (Get-Content -LiteralPath $outFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
+    } catch { Write-Log "OPENCLAW_CLI_ERR: $_"; return '' }
+    finally {
+        Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$outFile.err" -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # 严格校验会话元数据（命令注入防线）
@@ -136,7 +162,7 @@ function Get-SessionsJson {
     $all = New-Object System.Collections.ArrayList
     foreach ($a in $agents) {
         if ($a -notmatch '^[A-Za-z0-9_-]+$') { continue }
-        $j = & openclaw sessions list --json --agent $a 2>&1 | Out-String
+        $j = Invoke-OpenClawCli -CliArgs @('sessions', 'list', '--json', '--agent', $a)
         if ($j) {
             try {
                 $p = $j | ConvertFrom-Json
@@ -235,6 +261,17 @@ function Write-Log {
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg"
     try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
 }
+
+# T07 安全修复：系统工具只从 System32 解析（绝对路径，无 PATH 搜索）
+$script:System32 = Join-Path $env:SystemRoot 'System32'
+$script:ExeTaskkill = Resolve-TrustedExe -Candidates @((Join-Path $script:System32 'taskkill.exe')) -Label 'taskkill.exe'
+$script:ExePowerShell = Resolve-TrustedExe -Candidates @((Join-Path $script:System32 'WindowsPowerShell\v1.0\powershell.exe')) -Label 'powershell.exe'
+if (-not $script:ExeTaskkill -or -not $script:ExePowerShell) {
+    Write-Log 'FATAL: required system utilities not found in System32'
+    exit 1
+}
+# 收紧进程 PATH，使任何遗漏的子调用也无法被劫持
+$env:PATH = "$script:System32;$env:SystemRoot"
 
 # T05 安全修复：Fail-Closed 启动检查——白名单为空则拒绝运行（最小权限原则）
 if (@($AllowedAgents).Count -eq 0) {
@@ -349,7 +386,7 @@ function Invoke-Compact {
                 Start-Sleep -Seconds 5
             }
             if (-not $p.HasExited) {
-                try { & taskkill /PID $p.Id /T /F 2>&1 | Out-Null } catch {}
+                try { if ($script:ExeTaskkill) { & $script:ExeTaskkill /PID $p.Id /T /F 2>&1 | Out-Null } } catch {}
                 Write-Log "CHUNKED_COMPACT_TIMEOUT: $key round=$round"
                 return -2
             }
@@ -383,7 +420,7 @@ function Invoke-Compact {
         if ($p.HasExited) { return $p.ExitCode }
         Start-Sleep -Seconds 5
     }
-    try { & taskkill /PID $p.Id /T /F 2>&1 | Out-Null } catch {}
+    try { if ($script:ExeTaskkill) { & $script:ExeTaskkill /PID $p.Id /T /F 2>&1 | Out-Null } } catch {}
     return -2   # 超时
 }
 

@@ -1,329 +1,167 @@
----
-version: 1.2.1
-name: "infinity-context"
-description: "Universal context compression & memory optimization for any Agent Skills host - DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama and more. Multi-layer compaction, local-only SQLite archive with FTS5 retrieval, automatic pre-compaction trajectory backups, and an optional opt-in auto-recovery that can resume a stalled session. Runs fully offline: no network, no MCP, no telemetry."
+﻿---
+name: infinity-context
+description: "Keeps long agent sessions alive: compresses context, archives every conversation chunk into a local SQLite/FTS5 store, and retrieves exact details on demand. Portable Python core that runs on DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama and any Agent Skills host. No network, no subprocesses, no Windows dependency."
 license: MIT
-compatibility: "Any host that loads standard SKILL.md / Agent Skills: DeepSeek Harness (dsh, .agents/skills/), Claude Code, OpenClaw, Cursor, Dify, Ollama, custom agents. Python 3.9+ for the redaction and SQLite engine; PowerShell 5.1+ on Windows for the optional watchdog and compaction hook. Local-only: no network access required."
+compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama, custom agents. Python 3.9+ standard library only. No network access, no external commands, no Windows-only APIs."
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.2.1"
+  version: "1.3.0"
   license: "MIT"
 ---
 
-# InfinityContext - Unlimited Context Compression & Memory Optimization
+# InfinityContext — portable context compression & memory archive
 
-> Keep any model running indefinitely with multi-layer compression, automatic backup, and FTS5 search.
+> Keep any model running indefinitely: compress context, archive every chunk locally, retrieve exact details later.
 
-> ⚠️ **Security & Privacy Notice**
->
-> 1. **Retention scope**: this skill does more than compress context. It also (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. Both are stored on this machine only.
-> 2. **Data minimization**: `MAX_ARCHIVE_LENGTH` truncates oversized content (head+tail kept, middle discarded) and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and email addresses. High-entropy candidates are excluded from the keyword index.
-> 3. **Fail-closed redaction**: if the redactor is unavailable or fails, the backup artifact is **destroyed**, never retained in plaintext. Retaining unredacted data requires an explicit opt-in (`$AllowUnredactedBackup = $true`).
-> 4. **Local only**: no cloud sync, no telemetry, no outbound network calls. Backup directories are ACL-restricted to the current user + SYSTEM.
-> 5. **Retention**: trajectory backups are kept for 30 days by default and pruned automatically; `scripts/cleanup-old-backups.ps1` performs manual cleanup plus SQLite `VACUUM`.
-> 6. **Declared auto-recovery**: an optional, opt-in capability can send **one** resume command to a session that stalled after a failed turn. It is **off by default** (`enableAutoWake` in the config file), sends exactly one attempt per monitor round, writes `WAKE_REQUEST` to the log before acting, and never spawns an external notification process. Disable it by leaving the flag unset.
-> 7. **Integrity**: the compaction hook verifies `pipeline.ps1` against `integrity.json` (SHA-256) and refuses to execute on mismatch. PowerShell is launched from its absolute `System32` path with an argument array — no shell, no `-Command`.
-> 8. **Background execution**: on OpenClaw it runs via internal hooks around compaction events and never interrupts your current session. Other hosts load the skill directly.
+## Quick start on DeepSeek Harness (dsh)
 
-## Permissions
+dsh uses the standard `SKILL.md` contract. Two rules matter:
 
-Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
-
-| Capability | Used for |
-|-----------|----------|
-| Shell / process | Launching the `openclaw` CLI and PowerShell helpers (argument arrays only — no shell string interpolation) |
-| File read | Reading session trajectory JSONL and local config files |
-| File write | Writing the SQLite archive, logs, and redacted trajectory backups under `%LOCALAPPDATA%` / `%USERPROFILE%` |
-| Environment | Reading `LOCALAPPDATA`, `USERPROFILE`, and `INFINITY_CONTEXT_AGENTS` |
-
-**Not declared because not used: network, MCP.** No data leaves the machine.
-
-Exactly one subprocess is launched from the hook: `pipeline.ps1`, resolved from the hook's own directory (never from `PATH`), verified against `integrity.json` (SHA-256) before execution, and run through the absolute `System32` path of `powershell.exe` with an argument array. No shell, no string interpolation, no `-Command`.
-
-## Host Compatibility
-
-InfinityContext is a standard **Agent Skills** skill (`SKILL.md`), so any host that loads that format can use it — **OpenClaw is not required**:
-
-| Host | Skills directory | Notes |
-|------|------------------|-------|
-| **DeepSeek Harness (dsh)** | `.agents/skills/infinity-context/` | First-class: dsh's `skill` plugin discovers repo/user skills from the same layout |
-| **Claude Code** | `.claude/skills/infinity-context/` | `allowed-tools` pre-approves the declared capabilities |
-| **OpenClaw** | `~/.openclaw/定制化功能/infinity-context/` | Additionally supports the optional `compaction-pipeline` hook for automatic pre-compaction backup |
-| **Cursor / Dify / Ollama / custom agents** | point the agent at this folder | The Python engine runs standalone |
-
-The **portable core** (redaction engine + SQLite/FTS5 archive) is plain Python 3.9+ and runs anywhere. The **optional watchdog** (`main-session-monitor.ps1`) and the **compaction hook** (`handler.js` + `pipeline.ps1`) are Windows/OpenClaw integrations; hosts without them still get the compression guidance, the archive, and FTS5 retrieval.
-
-> **Registry package note**: ClawHub (and similar registries) reject packages that contain self-executing JavaScript. This package therefore ships **no `.js` files**: the optional OpenClaw compaction hook (`src/handler.js`, `src/HOOK.md`, `src/integrity.json`) is distributed in the **GitHub repository only**. Everything in this package runs as scripts that the agent invokes through its declared tools.
-
-## Overview
-
-Small models (128K context) can exhaust their window in a single deep-thought turn. InfinityContext provides three layers of protection to ensure conversations never break:
-
-1. **Config Layer**: `keepRecentTokens=15000` + watchdog threshold at 35%
-2. **Pipeline Layer**: Automatic backup → SQLite → compression → wake
-3. **Hook Layer**: `compaction-pipeline` hook intercepts ALL compaction paths (manual/auto/watchdog) ensuring backup → SQLite → enhanced summary coverage
-4. **Memory Layer**: MEMORY.md streamlined + FTS5 on-demand retrieval
-
-## Installation
-
-### 0. Any Agent Skills host (no OpenClaw required)
-
-Copy this folder into your host's skills directory and the agent can load it immediately:
-
-| Host | Skills directory |
-|------|------------------|
-| DeepSeek Harness (dsh) | `.agents/skills/infinity-context/` |
-| Claude Code | `.claude/skills/infinity-context/` |
-| OpenClaw | `~/.openclaw/定制化功能/infinity-context/` |
-
-The Python engine is usable on its own: `python scripts/session_to_sqlite.py --help`.
-
-### 1. OpenClaw Configuration (optional — enables automatic pre-compaction backup)
-
-Add to `openclaw.json`:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "compaction": {
-        "mode": "safeguard",
-        "keepRecentTokens": 15000,
-        "model": "tokease/deepseek-v4-flash",
-        "timeoutSeconds": 600,
-        "midTurnPrecheck": { "enabled": true },
-        "memoryFlush": {
-          "model": "tokease/deepseek-v4-flash",
-          "enabled": true,
-          "softThresholdTokens": 10000
-        }
-      }
-    }
-  },
-  "hooks": {
-    "internal": {
-      "entries": {
-        "compaction-pipeline": { "enabled": true }
-      },
-      "load": {
-        "extraDirs": ["~/.openclaw/hooks"]
-      },
-      "enabled": true
-    }
-  }
-}
-```
-
-### 2. Deploy Scripts
-
-Copy files from `scripts/` to `~/.openclaw/scripts/` (pipeline.ps1 also needs to live next to the hook — see below):
-- `main-session-monitor.ps1` — Watchdog (v6.8)
-- `pipeline.ps1` — Hook pipeline (backup + SQLite + summary)
-- `session-to-sqlite.ps1` — JSONL → SQLite wrapper
-
-Copy `src/handler.js`, `src/HOOK.md`, `src/integrity.json` **and `scripts/pipeline.ps1`** to `~/.openclaw/hooks/compaction-pipeline/` (the hook executes `pipeline.ps1` from this directory). The `src/` files come from the **GitHub repository** — registry packages omit them, as noted above.
-
-After editing `pipeline.ps1`, regenerate the manifest so the hook keeps running:
-
-```powershell
-powershell -NoProfile -File scripts\update-integrity.ps1 -PipelineScript scripts\pipeline.ps1 -ManifestPath src\integrity.json
-```
-
-Copy `src/session_to_sqlite.py` to `~/.openclaw/scripts/`.
-
-### 3. Scheduling (Optional)
-
-**本插件依赖 OpenClaw 原生事件钩子运行，无需在系统中安装计划任务后台服务。**
-
-可选：如需看门狗定期检查（非必需），请使用 OpenClaw 自带的调度能力（`automations`），
-
-### 4. Restart Gateway
+- the **directory name must equal the frontmatter `name`** → use `infinity-context`
+- **recursive discovery is not supported** → the skill folder must be a direct child of a discovery root
 
 ```bash
-openclaw gateway restart
+# user-level (rank 500, shared with Claude Code and other agents)
+mkdir -p ~/.agents/skills/infinity-context
+cp -r ./* ~/.agents/skills/infinity-context/
+
+# or project-level (rank 200, wins over the user-level copy)
+mkdir -p <project>/.agents/skills/infinity-context
+cp -r ./* <project>/.agents/skills/infinity-context/
 ```
+
+Restart dsh, type `/`, and the skill appears under **Skills**. There is nothing else to install: a skill takes effect the moment its folder sits in a scan root. Then drive it from the agent's shell tool:
+
+```bash
+# archive a transcript (JSONL) into the local SQLite/FTS5 store
+python3 scripts/session_to_sqlite.py --session-key <key> --session-file <events.jsonl> --output-dir ~/.infinity-context/archive
+
+# retrieve a detail from months ago
+python3 scripts/search.py --query "deployment token"
+
+# prune old archives (dry-run by default)
+python3 scripts/cleanup.py --dry-run
+```
+
+## Host compatibility
+
+| Host | Install location | Notes |
+|------|------------------|-------|
+| **DeepSeek Harness (dsh)** | `~/.agents/skills/infinity-context/` or `<project>/.agents/skills/infinity-context/` | First-class; same contract as Claude Code |
+| **Claude Code** | `~/.claude/skills/infinity-context/` | `allowed-tools` pre-approves the declared capabilities |
+| **OpenClaw** | `~/.openclaw/定制化功能/infinity-context/` | Portable core only; host automation is a separate integration |
+| **Cursor / Dify / Ollama / custom** | point the agent at this folder | Pure Python standard library |
+
+The core is **host-agnostic**: three Python scripts, no network, no subprocesses, no Windows-only APIs.
+
+## What it does
+
+1. **Archive** (`session_to_sqlite.py`) — turns a session transcript into a local SQLite database with an FTS5 index, so a compressed session can still be searched down to the message.
+2. **Retrieve** (`search.py`) — FTS5 trigram search with a `LIKE` fallback for short CJK queries; reads only, never writes.
+3. **Prune** (`cleanup.py`) — retention-based cleanup with canonical path anchoring and `VACUUM`; dry-run by default.
+
+Compression itself is a prompt-level discipline: keep `keepRecentTokens` small enough that a deep reply still fits, and let the archive carry the details instead of the context window.
+
+## Security & privacy
+
+- **Local only** — no network calls, no telemetry, no MCP, no cloud sync.
+- **No subprocesses** — the scripts never spawn a shell or another program.
+- **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. High-entropy candidates are excluded from the keyword index. If the redactor cannot run, the record is not written.
+- **Data minimisation** — `MAX_ARCHIVE_LENGTH` truncates oversized content (head + tail kept) before storage.
+- **Deny-by-default filesystem rules** — `cleanup.py` only deletes files inside the canonical archive directory, only with whitelisted extensions, never through a symbolic link, and never without `--apply`.
+
+## Package boundary & trust model
+
+This package is **self-contained**: `SKILL.md`, `README.md`, `说明.md`, `CHANGELOG.md`, `SPONSORS.md`, `LICENSE`, `scripts/` (Python only), `references/`, `sponsors/`. It contains no JavaScript, no PowerShell, and no code fetched at install time — the audited artifact is exactly what runs.
+
+Host-specific automation (for example an OpenClaw compaction hook) is deliberately **out of scope** for this package. Anything of that kind lives in the repository outside the published artifact and carries its own documentation, pinned revision and checksums.
+
+## Configuration
+
+| Setting | Default | Where |
+|---------|---------|-------|
+| archive directory | `~/.infinity-context/archive` | `--output-dir` / `--archive-dir`, or `INFINITY_CONTEXT_HOME` |
+| `MAX_ARCHIVE_LENGTH` | `20000` characters | `scripts/session_to_sqlite.py` |
+| redaction rules | built in | `scripts/session_to_sqlite.py` (add `redact_rules.json` beside it to extend) |
+| retention | 30 days | `cleanup.py --days` (1..3650) |
 
 ## Architecture
 
 ```
-Any compaction trigger (manual/auto/watchdog):
-  │
-  ├─ compact:before → pipeline.ps1
-  │   ├─ export-trajectory (full history backup)
-  │   └─ session-to-sqlite (JSONL → SQLite + FTS5)
-  │
-  ├─ OpenClaw executes compression
-  │
-  └─ compact:after → pipeline.ps1
-      └─ enhanced summary (keyword index from SQLite)
-
-Deduplication: if backup exists within 5 minutes, skip (avoids duplicate work)
+session transcript (JSONL)
+        │
+        ├─ redact  ────────────────► fail-closed: nothing is stored if this step fails
+        ├─ truncate (MAX_ARCHIVE_LENGTH)
+        ▼
+  session_chunks  ──trigger──►  chunk_fts (FTS5 trigram)
+        │
+        └─ search.py  ──►  exact detail from any past turn
 ```
-
-## Space Guarantee (128K model)
-
-```
-Post-composition context:
-  System prompt + tools  ≈ 30K tokens (fixed)
-  Summary               ≈ 7K tokens
-  Recent messages       = 15K tokens
-  ─────────────────────────────
-  Total                 = 52K / 131K (40%)
-  Remaining             = 79K tokens
-
-Worst-case single reply:
-  thinking: 30K + reply: 10K + tools: 15K = 55K
-
-  79K > 55K → guaranteed at least 1 full deep reply
-```
-
-## Configuration Reference
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| keepRecentTokens | 15000 | Post-compaction retention (128K models) |
-| ThresholdPct | 35.0 | Watchdog trigger threshold (%) |
-| ThresholdAbsTokens | 60000 | Absolute token threshold |
-| CompactCooldownMin | 5 | Cooldown between compressions |
-| StickyLimit | 5 | Failures before pause |
-| StickyPauseMin | 30 | Pause duration (minutes) |
-
-## Security Model (v7.1)
-
-InfinityContext follows **Deny by Default** for every privileged operation.
-
-### Agent authorization (T05)
-
-Only agents explicitly listed in the allowlist are ever read, exported, or compacted. There is **no** "empty list means all agents" fallback.
-
-Resolution order:
-
-1. Environment variable `INFINITY_CONTEXT_AGENTS` (comma-separated, e.g. `main,yai`)
-2. Config file `%LOCALAPPDATA%\.openclaw\infinity-context.config.json` → `{"allowedAgents":["main","yai"]}`
-3. Built-in default: `@('main')`
-
-If the resolved list is empty (for example the config file explicitly contains `[]`), both scripts **abort** with a `SECURITY_ABORT` log entry instead of falling back to allow-all. `pipeline.ps1` additionally derives the agent from the session key (`agent:<id>:...`) and denies anything outside the allowlist.
-
-Neither script enumerates the `~/.openclaw/agents` directory any more.
-
-### Backup cleanup hardening (T09)
-
-`scripts/cleanup-old-backups.ps1` only touches files that satisfy **all** of:
-
-- `$RetentionDays` is a validated integer in `1..3650` (0 and negatives rejected)
-- the canonical target path is `%LOCALAPPDATA%\.openclaw\backups` itself or a real sub-directory of it (`GetFullPath` + separator-anchored prefix check, so `backups-evil` cannot pass)
-- the file extension is in `.jsonl .db .db-wal .db-shm .bak .tmp .json`
-- the file is not a reparse point (symlink / junction)
-
-It also supports `-WhatIf` / `-Confirm` (`SupportsShouldProcess`) so the deletion set can be audited before anything is removed.
-
-### Fail-closed redaction (T09)
-
-`Redact-TrajectoryFile` returns `$true` only when the artifact was actually redacted. Any of these conditions destroys the artifact and aborts the backup instead of keeping plaintext:
-
-- the redaction engine or Python is unavailable
-- the redactor exits non-zero
-- the redactor throws
-
-### Declared auto-recovery
-
-`Invoke-WakeSession` is an **opt-in, declared** capability, not a hidden one:
-
-- disabled unless `enableAutoWake: true` is present in `%LOCALAPPDATA%\.openclaw\infinity-context.config.json`
-- the session key is validated by `[ValidatePattern]` **and** re-checked by `Test-SafeSessionKey` before it reaches any process boundary
-- exactly **one** attempt per monitor round; there is no hidden `Start-Sleep` retry loop and no external notification process is spawned
-- every attempt is logged as `WAKE_REQUEST` before the command runs
-
-### Script integrity (hook)
-
-`handler.js` resolves `pipeline.ps1` from its own directory or the legacy hook directory, rejects symlinks and empty files, requires the `# compaction-pipeline.ps1` marker, verifies the SHA-256 digest in `integrity.json`, and launches PowerShell from its absolute `System32` path. A mismatch or a missing manifest means **no execution**, with the reason written to the log.
-
-## Key Fixes (v7.1)
-
-| Version | Fix | Root Cause |
-|---------|-----|------------|
-| v5.9 | Dual condition trigger + session_chunks table | Wrong SQL table name |
-| v6.3 | UTF-8 encoding forced | PS5.1 defaults to GBK |
-| v6.3 | Control character cleanup | Invalid chars in session JSON |
-| v6.4 | Colon path fix | Windows disallows colons in dirs |
-| v6.5 | SqliteDir ASCII-only | Python sqlite3 can't handle Unicode paths |
-| v6.6 | sticky pausedUntil write | State variable was read-only |
-| v6.6 | sticky [long] for timestamps | [int] overflow on 13-digit ms |
-| v6.7 | compaction-pipeline hook | Manual/auto compaction bypassed watchdog pipeline |
-| v6.7 | handler.js exports.default | Hook loader couldn't find handler |
-| v6.7 | pipeline.ps1 temp .py files | PowerShell string escaping broke inline Python |
-| v6.8 | Unified backup pipeline + dedup | Watchdog and hook duplicated backup work |
-| v7.0 | Memory file is pure JSON data | Instruction-hijacking pattern in agent memory |
-| v7.0 | Python via temp .py + argv | PowerShell string interpolation injection |
-| v7.0 | No policy-bypass flag / VBS launcher | Persistence-style launch path |
-| v7.1 | Allowlist is fail-closed | Empty allowlist degraded to allow-all |
-| v7.1 | No agents-directory enumeration | Cross-agent data collection |
-| v7.1 | Cleanup path canonical anchoring | Arbitrary-directory recursive deletion |
-| v7.2 | Redaction is fail-closed | Redaction failure retained plaintext backup |
-| v7.2 | Auto-recovery declared + single attempt | Description/behaviour mismatch, hidden retry loop |
-| v7.2 | No external notification spawn | Intent/code divergence (docs said silent) |
-| v7.2 | Hook integrity manifest + absolute PowerShell | Unverified subprocess extension point |
-| v7.2 | Direct Python call in pipeline | Redundant `powershell.exe` child process |
-
-## SQLite FTS5 Search
-
-Compressed sessions are stored in SQLite with FTS5 trigram search:
-
-```sql
--- Trigram search (≥3 characters)
-SELECT * FROM chunk_fts WHERE chunk_fts MATCH 'keyword';
-
--- LIKE fallback (Chinese 2-char)
-SELECT * FROM session_chunks WHERE raw_content LIKE '%keyword%';
-```
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-# 无限上下文压缩与记忆优化
+# 无限上下文压缩与记忆归档
 
-> 通过多层压缩、自动备份和 FTS5 搜索，让任何模型持续对话而不中断。
+> 让任何模型持续对话：压缩上下文、把每个片段归档到本地、随时精确检索细节。
 
-## 概述
+## 在 DeepSeek Harness（dsh）上快速开始
 
-小模型（128K 上下文）一次深度思考就可能耗尽窗口。InfinityContext 通过三层防护确保对话永不中断：
+dsh 使用标准 `SKILL.md` 契约，两条规则必须注意：
 
-1. **配置层**：`keepRecentTokens=15000` + 看门狗阈值 35%
-2. **管线层**：自动备份→SQLite→压缩→唤醒
-3. **Hook 层**：`compaction-pipeline` hook 拦截所有压缩路径，确保备份→SQLite→增强摘要全覆盖
-4. **记忆层**：MEMORY.md 精简 + FTS5 按需检索
+- **目录名必须与 frontmatter 的 `name` 一致** → 用 `infinity-context`
+- **不支持递归发现** → 技能文件夹必须是发现根目录的直接子目录
 
-## 安装
+```bash
+# 用户级（rank 500，与 Claude Code 共享）
+mkdir -p ~/.agents/skills/infinity-context
+cp -r ./* ~/.agents/skills/infinity-context/
 
-详见上方英文版安装步骤。
-
-## 架构
-
-```
-任意压缩触发（手动/自动/看门狗）
-  ├─ compact:before → pipeline.ps1（备份+SQLite）
-  ├─ OpenClaw 执行压缩
-  └─ compact:after → pipeline.ps1（增强摘要）
-去重机制：5分钟内已有备份则跳过
+# 或项目级（rank 200，优先级高于用户级）
+mkdir -p <project>/.agents/skills/infinity-context
+cp -r ./* <project>/.agents/skills/infinity-context/
 ```
 
-## 配置参考
+重启 dsh，输入 `/`，技能即出现在 **Skills** 分组。无需其它安装步骤——文件夹进入扫描根即生效。然后通过 agent 的 shell 工具调用：
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| keepRecentTokens | 15000 | 压缩后保留（128K 模型） |
-| ThresholdPct | 35.0 | 看门狗触发阈值（%） |
-| ThresholdAbsTokens | 60000 | 绝对值门槛 |
-| StickyLimit | 5 | 连续失败暂停阈值 |
-| StickyPauseMin | 30 | 暂停时长（分钟） |
+```bash
+python3 scripts/session_to_sqlite.py --session-key <key> --session-file <events.jsonl> --output-dir ~/.infinity-context/archive
+python3 scripts/search.py --query "部署 token"
+python3 scripts/cleanup.py --dry-run
+```
+
+## 兼容性
+
+| 宿主 | 安装位置 |
+|------|----------|
+| **DeepSeek Harness（dsh）** | `~/.agents/skills/infinity-context/` 或 `<project>/.agents/skills/infinity-context/` |
+| **Claude Code** | `~/.claude/skills/infinity-context/` |
+| **OpenClaw** | `~/.openclaw/定制化功能/infinity-context/` |
+| **Cursor / Dify / Ollama / 自研** | 指向本文件夹即可 |
+
+## 三个脚本
+
+1. **归档** `session_to_sqlite.py`——把会话轨迹转成本地 SQLite + FTS5 索引
+2. **检索** `search.py`——FTS5 三元组搜索，短中文词自动回退 `LIKE`；只读
+3. **清理** `cleanup.py`——按保留期清理并 `VACUUM`；默认演练模式
+
+## 安全与隐私
+
+- **纯本地**：不联网、无遥测、无 MCP、不上传
+- **无子进程**：脚本从不启动 shell 或其它程序
+- **Fail-Closed 脱敏**：入库前屏蔽 API Key / Token / 密码 / JWT / 私钥 / 连接串 / Cookie / Webhook / 手机号 / 邮箱；脱敏不可用时**不写入**
+- **数据最小化**：`MAX_ARCHIVE_LENGTH` 掐头去尾截断
+- **默认拒绝的文件系统规则**：`cleanup.py` 只删归档目录内、白名单扩展名、非符号链接的文件，且必须显式 `--apply`
+
+## 包边界与信任模型
+
+本包**自包含**：`SKILL.md`、`README.md`、`说明.md`、`CHANGELOG.md`、`SPONSORS.md`、`LICENSE`、`scripts/`（仅 Python）、`references/`、`sponsors/`。**不含任何 JavaScript / PowerShell，也不在安装时拉取外部代码**——被审计的产物就是实际运行的东西。
+
+宿主专有的自动化（例如 OpenClaw 压缩钩子）**不属于本包范围**，只存在于仓库中、位于发布产物之外，并自带文档、固定版本号与校验和。
 
 ## 许可证
 
