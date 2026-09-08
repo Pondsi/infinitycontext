@@ -57,8 +57,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 2. From source: pin the reviewed release tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.2
-grep -q '^version: "1.6.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.3
+grep -q '^version: "1.6.3"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 
 # 3. Copy exactly these files (never `cp -r`, never a wildcard)
@@ -129,8 +129,8 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 方式二：源码安装——固定已发布 tag（必须等于 SKILL.md 的 version），并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.6.2
-grep -q '^version: "1.6.2"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.6.3
+grep -q '^version: "1.6.3"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 
 # 逐文件显式复制（禁止 cp -r、禁止通配符）
@@ -161,6 +161,16 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 - Python 3.9+（脱敏引擎 + SQLite/FTS5 归档，可独立运行的核心）
 - PowerShell 5.1+（仅 Windows，用于可选看门狗与压缩钩子）
 
+### 安全与隐私
+
+- **纯本地**：无网络请求、无遥测、无云同步，数据只留在本机。
+- **压缩前先导出**：每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入本地 SQLite/FTS5 归档（可全文检索）。
+- **脱敏 + 数据最小化**：正则脱敏屏蔽 API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱，高熵内容不进索引；超长内容按 `MAX_ARCHIVE_LENGTH` 掐头去尾。
+- **Fail-Closed**：脱敏无法执行时直接销毁备份，绝不保留明文。
+- **权限与保留**：备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。
+- **默认不自动唤醒**：`enableAutoWake` 需显式开启；每轮最多发送一次经校验的「继续」指令，执行前先写 `WAKE_REQUEST` 日志；Agent 白名单默认拒绝。
+- **完整性校验**：压缩钩子执行前用 `integrity.json` 校验 `pipeline.ps1`。
+
 ### 许可证
 
 MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
@@ -187,8 +197,18 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### 安全性與隱私
+
+- **純本機**：無網路請求、無遙測、無雲端同步，資料只留在本機。
+- **壓縮前先匯出**：每次壓縮前匯出完整會話軌跡，並把去識別化後的對話片段寫入本機 SQLite/FTS5 封存（可全文檢索）。
+- **去識別化 + 資料最小化**：正則規則遮蔽 API Key / Token / 密碼 / JWT / 私鑰 / 連線字串 / 手機號 / 電子郵件，高熵內容不進索引；過長內容依 `MAX_ARCHIVE_LENGTH` 掐頭去尾。
+- **Fail-Closed**：去識別化無法執行時直接銷毀備份，絕不保留明文。
+- **權限與保留**：備份目錄 ACL 收緊為「目前使用者 + SYSTEM」，預設保留 30 天後自動清理。
+- **預設不自動喚醒**：`enableAutoWake` 需明確開啟；每輪最多發送一次經驗證的「繼續」指令，執行前先寫 `WAKE_REQUEST` 記錄；Agent 白名單預設拒絕。
+- **完整性校驗**：壓縮鉤子執行前以 `integrity.json` 校驗 `pipeline.ps1`。
 
 ### 許可證
 
@@ -215,8 +235,18 @@ InfinityContext は、小規模モデル（128K コンテキスト）のコン�
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### セキュリティとプライバシー
+
+- **完全ローカル**：ネットワーク通信・テレメトリ・クラウド同期は一切なし。データは端末内にのみ保存されます。
+- **圧縮前に完全エクスポート**：圧縮のたびにセッション軌跡全体をエクスポートし、秘匿化した会話断片をローカルの SQLite/FTS5 アーカイブ（全文検索可能）に書き込みます。
+- **秘匿化とデータ最小化**：正規表現で API キー / トークン / パスワード / JWT / 秘密鍵 / 接続文字列 / 電話番号 / メールをマスクし、高エントロピー値は索引から除外。長すぎる内容は `MAX_ARCHIVE_LENGTH` で頭と末尾のみ保持します。
+- **Fail-Closed**：秘匿化を実行できない場合はバックアップを破棄し、平文を残しません。
+- **権限と保持期間**：バックアップの ACL は「現在のユーザー + SYSTEM」に限定。既定で 30 日後に自動削除されます。
+- **自動復帰は既定で無効**：`enableAutoWake` を明示的に有効化した場合のみ、1 ラウンドにつき検証済みの「続行」コマンドを 1 回だけ送信し、実行前に `WAKE_REQUEST` を記録します。Agent の許可リストは既定で拒否。
+- **完全性検証**：圧縮フックは実行前に `integrity.json` で `pipeline.ps1` を検証します。
 
 ### ライセンス
 
@@ -243,8 +273,18 @@ InfinityContext는 소규모 모델(128K 컨텍스트)의 컨텍스트 오버플
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### 보안 및 개인정보
+
+- **완전 로컬**: 네트워크 요청·텔레메트리·클라우드 동기화가 없습니다. 데이터는 이 컴퓨터에만 남습니다.
+- **압축 전 전체 내보내기**: 압축할 때마다 세션 전체 기록을 내보내고, 마스킹된 대화 조각을 로컬 SQLite/FTS5 아카이브(전문 검색 가능)에 기록합니다.
+- **마스킹 및 데이터 최소화**: 정규식으로 API 키 / 토큰 / 비밀번호 / JWT / 개인 키 / 연결 문자열 / 전화번호 / 이메일을 가리고, 엔트로피가 높은 값은 색인에서 제외합니다. 지나치게 긴 내용은 `MAX_ARCHIVE_LENGTH`로 앞뒤만 보관합니다.
+- **Fail-Closed**: 마스킹을 실행할 수 없으면 백업을 파기하며 평문을 남기지 않습니다.
+- **권한 및 보존**: 백업 ACL은 "현재 사용자 + SYSTEM"으로 제한되며 기본 30일 후 자동 삭제됩니다.
+- **자동 깨우기 기본 꺼짐**: `enableAutoWake`를 명시적으로 켠 경우에만 라운드당 검증된 "계속" 명령을 한 번 보내며, 실행 전에 `WAKE_REQUEST`를 기록합니다. Agent 허용 목록은 기본 거부입니다.
+- **무결성 검사**: 압축 훅은 실행 전에 `integrity.json`으로 `pipeline.ps1`을 검증합니다.
 
 ### 라이선스
 
@@ -271,8 +311,18 @@ InfinityContext es un Skill de OpenClaw que previene el desbordamiento de contex
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### Seguridad y privacidad
+
+- **Solo local**: sin peticiones de red, sin telemetría y sin sincronización en la nube. Los datos permanecen en este equipo.
+- **Exportación completa antes de comprimir**: cada compactación exporta toda la trayectoria de la sesión y escribe fragmentos de conversación redactados en un archivo SQLite/FTS5 local (con búsqueda de texto completo).
+- **Redacción y minimización**: expresiones regulares ocultan claves de API, tokens, contraseñas, JWT, claves privadas, cadenas de conexión, teléfonos y correos; los valores de alta entropía se excluyen del índice. El contenido demasiado largo se recorta con `MAX_ARCHIVE_LENGTH` (se conservan inicio y final).
+- **Fail-closed**: si la redacción no puede ejecutarse, la copia de seguridad se destruye; nunca se conserva en texto plano.
+- **Permisos y retención**: la ACL de las copias se limita al usuario actual + SYSTEM y se eliminan automáticamente a los 30 días por defecto.
+- **Reanudación automática desactivada por defecto**: `enableAutoWake` requiere activación explícita; envía un único comando de continuación validado por ronda y registra `WAKE_REQUEST` antes de ejecutarlo. La lista de agentes permitidos es de denegación por defecto.
+- **Verificación de integridad**: el hook de compactación verifica `pipeline.ps1` contra `integrity.json` antes de ejecutarlo.
 
 ### Licencia
 
@@ -299,8 +349,18 @@ InfinityContext é um Skill do OpenClaw que previne o transbordamento de context
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### Segurança e privacidade
+
+- **Somente local**: sem requisições de rede, sem telemetria e sem sincronização na nuvem. Os dados permanecem neste computador.
+- **Exportação completa antes de comprimir**: cada compactação exporta toda a trajetória da sessão e grava trechos de conversa redigidos em um arquivo SQLite/FTS5 local (com busca em texto completo).
+- **Redação e minimização**: expressões regulares mascaram chaves de API, tokens, senhas, JWT, chaves privadas, strings de conexão, telefones e e-mails; valores de alta entropia ficam fora do índice. Conteúdo muito longo é recortado por `MAX_ARCHIVE_LENGTH` (mantendo início e fim).
+- **Fail-closed**: se a redação não puder ser executada, o backup é destruído; nunca é mantido em texto claro.
+- **Permissões e retenção**: a ACL dos backups é restrita ao usuário atual + SYSTEM e eles são removidos automaticamente após 30 dias por padrão.
+- **Retomada automática desativada por padrão**: `enableAutoWake` exige ativação explícita; envia um único comando de continuação validado por rodada e registra `WAKE_REQUEST` antes de executar. A lista de agentes permitidos é de negação por padrão.
+- **Verificação de integridade**: o hook de compactação verifica `pipeline.ps1` contra `integrity.json` antes de executar.
 
 ### Licença
 
@@ -327,8 +387,18 @@ InfinityContext est un Skill OpenClaw qui empêche le débordement de contexte d
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### Sécurité et confidentialité
+
+- **100 % local** : aucune requête réseau, aucune télémétrie, aucune synchronisation cloud. Les données restent sur cette machine.
+- **Export complet avant compression** : chaque compaction exporte l'intégralité de la trajectoire de session et écrit des extraits de conversation masqués dans une archive SQLite/FTS5 locale (recherche plein texte).
+- **Masquage et minimisation** : des expressions régulières masquent clés d'API, jetons, mots de passe, JWT, clés privées, chaînes de connexion, téléphones et e-mails ; les valeurs à forte entropie sont exclues de l'index. Les contenus trop longs sont tronqués via `MAX_ARCHIVE_LENGTH` (début et fin conservés).
+- **Fail-closed** : si le masquage ne peut pas s'exécuter, la sauvegarde est détruite ; aucun texte en clair n'est conservé.
+- **Permissions et rétention** : l'ACL des sauvegardes est limitée à l'utilisateur courant + SYSTEM et elles sont supprimées automatiquement après 30 jours par défaut.
+- **Reprise automatique désactivée par défaut** : `enableAutoWake` doit être activé explicitement ; il envoie une seule commande de reprise validée par cycle et journalise `WAKE_REQUEST` avant exécution. La liste d'agents autorisés est en refus par défaut.
+- **Vérification d'intégrité** : le hook de compaction vérifie `pipeline.ps1` via `integrity.json` avant exécution.
 
 ### Licence
 
@@ -355,8 +425,18 @@ InfinityContext ist ein OpenClaw-Skill, der Kontext-Überlauf in kleinen Modelle
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### Sicherheit und Datenschutz
+
+- **Nur lokal**: keine Netzwerkanfragen, keine Telemetrie, keine Cloud-Synchronisierung. Die Daten bleiben auf diesem Rechner.
+- **Vollständiger Export vor dem Komprimieren**: Jede Komprimierung exportiert den kompletten Sitzungsverlauf und schreibt redigierte Gesprächsausschnitte in ein lokales SQLite/FTS5-Archiv (Volltextsuche).
+- **Redaktion und Datenminimierung**: Reguläre Ausdrücke maskieren API-Schlüssel, Token, Passwörter, JWT, private Schlüssel, Verbindungszeichenfolgen, Telefonnummern und E-Mails; Werte mit hoher Entropie werden nicht indexiert. Zu lange Inhalte werden per `MAX_ARCHIVE_LENGTH` gekürzt (Anfang und Ende bleiben erhalten).
+- **Fail-Closed**: Kann die Redaktion nicht ausgeführt werden, wird das Backup vernichtet; Klartext wird nie behalten.
+- **Rechte und Aufbewahrung**: Die ACL der Backups ist auf aktuellen Benutzer + SYSTEM beschränkt; sie werden standardmäßig nach 30 Tagen gelöscht.
+- **Automatisches Wiederaufnehmen standardmäßig aus**: `enableAutoWake` muss ausdrücklich aktiviert werden; es wird pro Runde genau ein geprüfter Fortsetzungsbefehl gesendet und vorher `WAKE_REQUEST` protokolliert. Die Agent-Allowlist ist standardmäßig deny-by-default.
+- **Integritätsprüfung**: Der Compaction-Hook prüft `pipeline.ps1` vor der Ausführung gegen `integrity.json`.
 
 ### Lizenz
 
@@ -383,8 +463,18 @@ InfinityContext — это навык OpenClaw, предотвращающий �
 ```bash
 # Registry install (scanned artifact, no git, no build step)
 clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the audited tag and verify checksums.txt - see "Quick Start" above
+# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
 ```
+
+### Безопасность и конфиденциальность
+
+- **Только локально**: никаких сетевых запросов, телеметрии и облачной синхронизации. Данные остаются на этом компьютере.
+- **Полный экспорт перед сжатием**: каждое сжатие экспортирует всю траекторию сессии и записывает отредактированные фрагменты диалога в локальный архив SQLite/FTS5 (полнотекстовый поиск).
+- **Редактирование и минимизация**: регулярные выражения маскируют API-ключи, токены, пароли, JWT, приватные ключи, строки подключения, телефоны и адреса электронной почты; значения с высокой энтропией не попадают в индекс. Слишком длинный текст обрезается через `MAX_ARCHIVE_LENGTH` (начало и конец сохраняются).
+- **Fail-Closed**: если редактирование невозможно, резервная копия уничтожается; открытый текст не сохраняется.
+- **Права и хранение**: ACL резервных копий ограничен текущим пользователем + SYSTEM; по умолчанию они удаляются через 30 дней.
+- **Автовозобновление отключено по умолчанию**: `enableAutoWake` включается явно; за один цикл отправляется одна проверенная команда продолжения, перед выполнением пишется `WAKE_REQUEST`. Список разрешённых агентов по умолчанию запрещает всё.
+- **Проверка целостности**: хук сжатия проверяет `pipeline.ps1` по `integrity.json` перед выполнением.
 
 ### Лицензия
 

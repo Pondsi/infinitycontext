@@ -3,6 +3,27 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.3 — 2026-09-09
+
+Documentation-parity release. The ClawHub review of 1.6.2 accepted the install-pin and
+ingestion-bound fixes and raised one actionable documentation finding:
+
+> The README advertises broad multilingual support, but most non-English sections omit
+> or dilute the detailed privacy, retention, integrity-check, and auto-wake safety
+> disclosures present in English.
+
+### Fixed
+- Every language section of `README.md` (简体中文, 繁體中文, 日本語, 한국어, Español,
+  Português, Français, Deutsch, Русский) now carries the same "security and privacy"
+  disclosure as English: local-only operation, full session-trajectory export before
+  each compaction, redacted local SQLite/FTS5 archive, regex redaction plus
+  `MAX_ARCHIVE_LENGTH` minimisation, fail-closed backup destruction, owner-only ACLs
+  with 30-day retention, `enableAutoWake` opt-in with a validated single resume command
+  and `WAKE_REQUEST` logging, deny-by-default agent allowlist, and `integrity.json`
+  verification of `pipeline.ps1` before the hook runs.
+- Source-install comments in every language now say "reviewed release tag" and pin
+  `v1.6.3`, matching the version in `SKILL.md`.
+
 ## 1.6.2 — 2026-09-09
 
 Install-instruction and ingestion-bound release. The ClawHub review of 1.6.1 accepted
