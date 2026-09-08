@@ -1,4 +1,4 @@
-﻿# InfinityContext
+# InfinityContext
 
 **Open-Source Context Compression & Memory Optimization for AI Agents**
 

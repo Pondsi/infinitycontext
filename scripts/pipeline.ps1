@@ -1,4 +1,4 @@
-# compaction-pipeline.ps1 — Hook handler: runs backup + SQLite before compaction, enhanced summary after
+﻿# compaction-pipeline.ps1 — Hook handler: runs backup + SQLite before compaction, enhanced summary after
 # Called by the compaction-pipeline hook (OpenClaw internal hook system)
 param(
     [Parameter(Mandatory=$true)]
@@ -40,7 +40,13 @@ $PyExe = Get-PythonExe
 $ScriptDir = $PSScriptRoot
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\trajectory-exports"
 $SqliteDir = "$env:USERPROFILE\.openclaw\sqlite-data"
-$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\compaction-pipeline.log"
+$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\compaction-pipeline.log"
+
+# Directory creation guard: ensure log/backup/sqlite dirs exist before writing
+foreach ($d in @((Split-Path $LogFile -Parent), "$env:LOCALAPPDATA\.openclaw\backups\trajectory-exports", "$env:USERPROFILE\.openclaw\sqlite-data")) {
+    if ($d -and -not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+}
+
 
 function Write-Log($msg) {
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -50,7 +56,16 @@ function Write-Log($msg) {
 function Export-Trajectory($key) {
     # Get session metadata for agentId
     try {
-        $metaRaw = (& openclaw sessions list --json --all-agents 2>&1 | Out-String) -replace '[\u0000-\u0008\u000B\u000C\u000E-\u001F]', ''
+        $metaRaw = ''
+        $agentsDir = "$env:USERPROFILE\.openclaw\agents"
+        $agentList = @()
+        if (Test-Path $agentsDir) { $agentList = @(Get-ChildItem $agentsDir -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) }
+        $metaAll = New-Object System.Collections.ArrayList
+        foreach ($ag in $agentList) {
+            $mj = & openclaw sessions list --json --agent $ag 2>&1 | Out-String
+            if ($mj) { try { $mp = $mj | ConvertFrom-Json; foreach ($ms in @($mp.sessions)) { [void]$metaAll.Add($ms) } } catch {} }
+        }
+        $metaRaw = (@{ sessions = @($metaAll) } | ConvertTo-Json -Depth 12 -Compress) -replace '[\u0000-\u0008\u000B\u000C\u000E-\u001F]', ''
         $meta = $metaRaw | ConvertFrom-Json
         $sess = @($meta.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
         if (-not $sess -or -not $sess.sessionId) {
@@ -67,10 +82,24 @@ function Export-Trajectory($key) {
         $exportData = $exportResult | ConvertFrom-Json
 
         if ($exportData -and $exportData.outputDir) {
-            $eventsPath = Join-Path $exportData.outputDir 'events.jsonl'
+            $srcDir = $exportData.outputDir
+            $eventsPath = Join-Path $srcDir 'events.jsonl'
             if (Test-Path $eventsPath) {
-                Write-Log "HOOK_BEFORE: BACKUP OK: $key -> $($exportData.outputDir) (events=$($exportData.transcriptEventCount))"
-                return @{ ExportDir = $exportData.outputDir; EventsPath = $eventsPath; AgentId = $sess.agentId }
+                # Portability fix: CLI requires a relative --output (resolved under the agent workspace).
+                # Move the export into our canonical LOCALAPPDATA backup dir so nothing is left in the workspace.
+                $destDir = Join-Path $BackupDir (Split-Path $srcDir -Leaf)
+                try {
+                    if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+                    Move-Item -Path (Join-Path $srcDir '*') -Destination $destDir -Force -ErrorAction Stop
+                    Remove-Item -Path $srcDir -Recurse -Force -ErrorAction SilentlyContinue
+                    $eventsPath = Join-Path $destDir 'events.jsonl'
+                    Write-Log "HOOK_BEFORE: BACKUP MOVED: $key -> $destDir (events=$($exportData.transcriptEventCount))"
+                    return @{ ExportDir = $destDir; EventsPath = $eventsPath; AgentId = $sess.agentId }
+                } catch {
+                    Write-Log "HOOK_BEFORE: BACKUP MOVE FAILED: $key ($_) - keeping original"
+                    Write-Log "HOOK_BEFORE: BACKUP OK: $key -> $srcDir (events=$($exportData.transcriptEventCount))"
+                    return @{ ExportDir = $srcDir; EventsPath = $eventsPath; AgentId = $sess.agentId }
+                }
             }
         }
         Write-Log "HOOK_BEFORE: EXPORT_EMPTY: $key"

@@ -1,4 +1,4 @@
-# cleanup-old-backups.ps1 - 清理旧备份文件（安全审计修复）
+﻿# cleanup-old-backups.ps1 - 清理旧备份文件（安全审计修复）
 # 保留最近 30 天的备份，删除更旧的
 
 param(

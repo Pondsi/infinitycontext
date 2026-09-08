@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # main-session-monitor.ps1 v6.6 - 主会话上下文监控（09-08 压缩管线完整修复+sticky双修复版）
 # 背景：08-18 事故——main dashboard 会话上下文膨胀到 804%（210万/26万），
 #       ollama 超窗 aborted 导致回复中断 1 小时+；监控只检测不压缩（计划任务
@@ -60,7 +60,34 @@ function Get-PythonExe {
     }
     return $null
 }
-$PyExe = Get-PythonExe
+$PyExe = Get-PythonExe
+# ===== T05 安全修复：会话枚举辅助函数（适配 openclaw 多 agent 要求）=====
+# 优先按白名单逐 agent 查询；白名单留空时自动探测本机 agent 目录（不硬编码、不使用全量枚举）
+function Get-SessionsJson {
+    $agents = @()
+    if ($AllowedAgents -and $AllowedAgents.Count -gt 0) {
+        $agents = @($AllowedAgents)
+    } else {
+        $agentsDir = "$env:USERPROFILE\.openclaw\agents"
+        if (Test-Path $agentsDir) {
+            $agents = @(Get-ChildItem $agentsDir -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+        }
+    }
+    if (-not $agents -or $agents.Count -eq 0) { return '{"sessions":[]}' }
+    $all = New-Object System.Collections.ArrayList
+    foreach ($a in $agents) {
+        $j = & openclaw sessions list --json --agent $a 2>&1 | Out-String
+        if ($j) {
+            try {
+                $p = $j | ConvertFrom-Json
+                foreach ($s in @($p.sessions)) { [void]$all.Add($s) }
+            } catch {}
+        }
+    }
+    return (@{ sessions = @($all) } | ConvertTo-Json -Depth 12 -Compress)
+}
+# =================================================================
+
 # =================================================================
 
 
@@ -84,7 +111,13 @@ $EnableAutoWake = $false
 
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\sessions"   # 压缩前 transcript 备份
 $LockFile = "$env:USERPROFILE\.openclaw\main-session-monitor.lock"
-$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\main-session-monitor.log"
+$LogFile = "$env:LOCALAPPDATA\.openclaw\logs\main-session-monitor.log"
+
+# Directory creation guard: ensure log/backup dirs exist before writing
+foreach ($d in @((Split-Path $LogFile -Parent), $BackupDir)) {
+    if ($d -and -not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+}
+
 $StateFile = "$env:LOCALAPPDATA\.openclaw\main-session-monitor-state.json"
 $CompactStateFile = "$env:USERPROFILE\.openclaw\compaction-active.json"   # v5.7: 压缩进行中标记（通知脚本据此跳过警告）
 
@@ -156,6 +189,8 @@ function Get-CompactionWindow {
 
 function Invoke-Compact {
     param([string]$key, [double]$usedTokens = 0)
+    # 从 session key 解析 agentId（compact 命令对 global key 要求 --agent）
+    $agentId = if ($key -match '^agent:([^:]+):') { $Matches[1] } else { '' }
     # v6.3（09-08 修复）：VBS 无控制台启动时 PS 5.1 默认 GBK 解码 stdout，openclaw UTF-8 中文 label 破坏 JSON——解析前强制 UTF-8 并重设
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
     # v6.8（09-08 修复）：统一由 hook 管线（pipeline.ps1）负责备份+SQLite，Invoke-Compact 不再重复
@@ -163,10 +198,13 @@ function Invoke-Compact {
     $pipelineScript = Join-Path $PSScriptRoot "pipeline.ps1"
     if (Test-Path $pipelineScript) {
         try {
-            Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+            $pp = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
                 '-NoProfile', '-File', $pipelineScript,
                 '-SessionKey', $key, '-Phase', 'before'
-            ) -WindowStyle Hidden -Wait -TimeoutSec 60 | Out-Null
+            ) -WindowStyle Hidden -PassThru
+            $ppDeadline = (Get-Date).AddSeconds(60)
+            while (-not $pp.HasExited -and (Get-Date) -lt $ppDeadline) { Start-Sleep -Milliseconds 500 }
+            if (-not $pp.HasExited) { try { & taskkill /PID $pp.Id /T /F 2>&1 | Out-Null } catch {} }
             Write-Log "PIPELINE_BEFORE: $key (hook pipeline)"
         } catch { Write-Log "PIPELINE_BEFORE_ERR: $key $_" }
     }
@@ -186,7 +224,7 @@ function Invoke-Compact {
             # 每轮只保留最近 30% 的内容（--max-lines 按行数估算）
             # 估算：每轮压缩保留约 40% 的原始内容
             $keepRatio = 0.4
-            $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'openclaw', 'sessions', 'compact', $key, '--timeout', "$($CompressTimeoutSec * 1000)") -WindowStyle Hidden -PassThru
+            $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'openclaw', 'sessions', 'compact', $key, '--agent', $agentId, '--timeout', "$($CompressTimeoutSec * 1000)") -WindowStyle Hidden -PassThru
             $deadline = (Get-Date).AddSeconds($CompressTimeoutSec + 20)
             while ((Get-Date) -lt $deadline) {
                 if ($p.HasExited) { break }
@@ -204,7 +242,7 @@ function Invoke-Compact {
             # 检查压缩后的 token 数
             Start-Sleep -Seconds 5
             try {
-                $afterJson = & openclaw sessions list --json 2>&1 | Out-String
+                $afterJson = Get-SessionsJson
                 $after = $afterJson | ConvertFrom-Json
                 $s2 = @($after.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                 if ($s2) {
@@ -220,7 +258,7 @@ function Invoke-Compact {
     }
     
     # 正常压缩模式
-    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'openclaw', 'sessions', 'compact', $key, '--timeout', "$($CompressTimeoutSec * 1000)") -WindowStyle Hidden -PassThru
+    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', 'openclaw', 'sessions', 'compact', $key, '--agent', $agentId, '--timeout', "$($CompressTimeoutSec * 1000)") -WindowStyle Hidden -PassThru
     $deadline = (Get-Date).AddSeconds($CompressTimeoutSec + 20)
     while ((Get-Date) -lt $deadline) {
         if ($p.HasExited) { return $p.ExitCode }
@@ -391,7 +429,7 @@ function Release-CompressionLock() {
 }
 
 try {
-    $sessionsJson = & openclaw sessions list --json 2>&1 | Out-String
+    $sessionsJson = Get-SessionsJson
     if (-not $sessionsJson) { Write-Output "LIST_FAILED"; exit 0 }
 
     # 状态：失败记忆 + 告警冷却 + 压缩冷却（⚠️ PSCustomObject 索引访问对特殊字符 key 失效，必须转 hashtable）
@@ -883,7 +921,7 @@ print(json.dumps(result, ensure_ascii=False))
                 # v5.2：压缩后验证会话状态（若被终结/轮换，绑定守卫会自动归档，保证记录不丢）
                 Start-Sleep -Seconds 5
                 try {
-                    $afterJson = & openclaw sessions list --json 2>&1 | Out-String
+                    $afterJson = Get-SessionsJson
                     $after = $afterJson | ConvertFrom-Json
                     $s2 = @($after.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                     if ($s2) {
@@ -903,7 +941,7 @@ print(json.dumps(result, ensure_ascii=False))
                                 # 等 10 秒后验证会话是否恢复
                                 Start-Sleep -Seconds 10
                                 try {
-                                    $wakeCheck = & openclaw sessions list --json 2>&1 | Out-String
+                                    $wakeCheck = Get-SessionsJson
                                     $wakeParsed = $wakeCheck | ConvertFrom-Json
                                     $wakeSess = @($wakeParsed.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                                     if ($wakeSess -and [string]$wakeSess.status -eq 'running') {
@@ -937,7 +975,7 @@ print(json.dumps(result, ensure_ascii=False))
                                 Invoke-WakeSession -SessionKey $key -Reason 'compact_rotated'
                                 Start-Sleep -Seconds 10
                                 try {
-                                    $wakeCheck2 = & openclaw sessions list --json 2>&1 | Out-String
+                                    $wakeCheck2 = Get-SessionsJson
                                     $wakeParsed2 = $wakeCheck2 | ConvertFrom-Json
                                     $wakeSess2 = @($wakeParsed2.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
                                     if ($wakeSess2 -and [string]$wakeSess2.status -eq 'running') {

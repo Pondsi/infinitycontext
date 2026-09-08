@@ -1,4 +1,4 @@
-# session-to-sqlite.ps1 - PowerShell 包装器，调用 session_to_sqlite.py
+﻿# session-to-sqlite.ps1 - PowerShell 包装器，调用 session_to_sqlite.py
 # 避免 PS5.1 here-string GBK 编码问题
 
 param(
