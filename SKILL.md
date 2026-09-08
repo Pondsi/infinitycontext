@@ -1,5 +1,5 @@
 ---
-version: 0.9.0
+version: 1.0.0
 name: "infinity-context"
 description: "Universal AI agent context compression & memory optimization: never forget goals, details, or reasoning — works with OpenClaw, Claude, ChatGPT, Gemini, Dify, Ollama, and any agent platform"
 ---
