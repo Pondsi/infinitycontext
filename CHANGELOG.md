@@ -3,6 +3,40 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.5.0 — 2026-09-09
+
+Fail-closed redaction. The audit found that the redaction path itself still contained
+silent failure branches: a broken rule file was ignored, an invalid regex was skipped,
+the session key was stored verbatim, and a mid-write failure could leave partial data —
+or, in append mode, delete a historical archive.
+
+### Fixed
+- **Rule loading is fail-closed.** `_load_redact_rules()` no longer swallows exceptions.
+  Malformed JSON, a non-object schema, a non-list `custom_redact_rules`, a non-dict
+  entry, an empty `pattern` or a non-string `replace` now raises `RedactionConfigError`
+  and exits with code 2 **before any file or database is created**.
+- **Rules are precompiled at startup.** Every built-in and custom pattern is compiled
+  once; an uncompilable pattern aborts the run. `redact_sensitive_info()` no longer
+  catches `re.error` and `continue` — an application-time failure raises instead.
+- **`session_key` is sanitised before it is used.** It is validated against
+  `^[A-Za-z0-9:_\-.@]{1,128}$` and passed through the redactor; anything else (or a
+  value that itself looks sensitive) becomes `opaque-<sha256[:16]>`. The sanitised value
+  is the only one used for filenames, the table and the FTS index, so a sensitive key can
+  no longer leak through a file name.
+- **Two-phase write with a non-destructive rollback.** The transcript is fully redacted
+  in memory before the database is opened, then written in a single transaction. On
+  failure the transaction is rolled back, the handle is closed first, and only a database
+  created by that same run is deleted. In append mode the existing archive is never
+  touched (`removed_new_db: false`).
+- The rule path can be overridden with `INFINITY_CONTEXT_REDACT_RULES`, which the new
+  regression tests use to feed deliberately broken rule files.
+
+### Verified
+- New regression suite: baseline redaction, malformed JSON, invalid regex, six wrong-type
+  payloads, sensitive `session_key`, effective custom rule, non-destructive rollback for
+  both new and existing databases, and source-level checks for silent-pass branches.
+- Three rounds: static/security, functional, and installed-copy end-to-end.
+
 ## 1.4.0 — 2026-09-09
 
 Fail-closed release. The archive now refuses to store readable data when it cannot

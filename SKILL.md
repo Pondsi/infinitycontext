@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.4.0"
+  version: "1.5.0"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -112,7 +112,7 @@ instead of the context window.
 - **Local only** — no network calls, no telemetry, no MCP, no cloud sync.
 - **No shell, no subprocesses** — the core never starts another program. Windows ACL hardening uses in-process Win32 security API calls, not a helper executable.
 - **Owner-only archive, fail-closed** — the archive directory is forced to `0700` and files to `0600` on POSIX; on Windows the DACL is replaced by a protected DACL granting only the current user and LOCAL SYSTEM. Every result is re-read to prove the mode took effect. New database files are created atomically with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600`, so no file ever exists with wider permissions. A symbolic link on the target path is refused. A pre-existing directory owned by another account is refused. If owner-only access cannot be enforced, archiving **aborts and the half-written database is destroyed** (`status: error`, exit 3) instead of storing readable data; `--allow-insecure-storage` is the only way to opt out, and the JSON result then reports `insecure_storage: true`.
-- **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. High-entropy candidates are excluded from the keyword index. If the redactor cannot run, the record is not written.
+- **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. Rules are validated and **precompiled at startup**: a malformed `redact_rules.json`, a wrong field type or an uncompilable regex aborts the run before any database is created, and a failure while applying a rule aborts instead of skipping it. `session_key` is sanitised **before** it is used for any path or filename — a value outside the safe identifier format (or one that itself looks sensitive) becomes an opaque hash, so it never reaches a filename, the table or the FTS index. The transcript is redacted entirely in memory, then written in a single transaction; on failure the transaction rolls back and only a database created by that same run is removed — an existing archive being appended to is never deleted. High-entropy candidates are excluded from the keyword index.
 - **Data minimisation** — `MAX_ARCHIVE_LENGTH` truncates oversized content (head + tail kept) before storage.
 - **Deny-by-default filesystem rules** — `cleanup.py` only deletes files inside the canonical archive directory, only with whitelisted extensions, never through a symbolic link, and never without `--apply`.
 
@@ -226,7 +226,7 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 - **纯本地**：不联网、无遥测、无 MCP、不上传
 - **无 shell、无子进程**：核心脚本从不启动其它程序；Windows ACL 使用进程内 Win32 安全 API，不调用外部工具
 - **归档仅本人可读，且 Fail-Closed**：POSIX 目录 `0700`、文件 `0600`；Windows 用受保护 DACL 仅授权当前用户与 LOCAL SYSTEM；加固后**回读校验**是否真的生效；新数据库文件以 `O_CREAT|O_EXCL|O_NOFOLLOW` + `0600` **原子创建**；路径上出现符号链接即**拒绝**；预存目录若属于其它账号则**拒绝使用**；**无法强制 owner-only 时中止归档并销毁半成品**（`status: error`，退出码 3），绝不留下可读的明文；仅 `--allow-insecure-storage` 可显式降级，且结果中会标记 `insecure_storage: true`
-- **Fail-Closed 脱敏**：入库前屏蔽 API Key / Token / 密码 / JWT / 私钥 / 连接串 / Cookie / Webhook / 手机号 / 邮箱；脱敏不可用时**不写入**
+- **Fail-Closed 脱敏**：入库前屏蔽 API Key / Token / 密码 / JWT / 私钥 / 连接串 / Cookie / Webhook / 手机号 / 邮箱；规则**启动期校验并预编译**——`redact_rules.json` 损坏、字段类型错误或正则无法编译都会在**建库之前中止**，应用规则时出错也中止而非跳过；`session_key` 在**生成任何路径/文件名之前**先净化（不符合安全字符集或本身疑似敏感→不透明哈希），绝不进入文件名、表或 FTS；轨迹先在**内存中全量脱敏**，再在**单事务**内写入，失败则回滚且**只清理本轮新建的库**，追加模式下的历史归档绝不被删除；高熵候选不进入关键词索引
 - **数据最小化**：`MAX_ARCHIVE_LENGTH` 掐头去尾截断
 - **默认拒绝的文件系统规则**：`cleanup.py` 只删归档目录内、白名单扩展名、非符号链接的文件，且必须显式 `--apply`
 

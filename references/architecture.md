@@ -40,8 +40,20 @@ Redaction runs **before** any derived field (keywords, anchors, summary) is comp
 again on each text column immediately before insert. The rule set covers API keys,
 bearer tokens, passwords, JWTs, AWS/Google/Slack credentials, PEM private keys,
 connection strings, cookies, webhooks, phone numbers and email addresses. High-entropy
-candidates are excluded from the keyword index. If the redactor cannot run, the record
-is not written — the pipeline is fail-closed rather than fail-open.
+candidates are excluded from the keyword index.
+
+The redaction path is fail-closed at every step:
+
+| Stage | Failure behaviour |
+|-------|-------------------|
+| rule file (`redact_rules.json`) | malformed JSON, non-object schema, wrong field type or empty pattern aborts with `RedactionConfigError` **before any file or database is created** (exit 2) |
+| regex compilation | every rule (built-in and custom) is compiled at startup; an uncompilable rule aborts the same way |
+| rule application | a substitution error raises instead of `continue`-ing past the rule |
+| `session_key` | sanitised before any path or filename is built; non-conforming or sensitive values become `opaque-<sha256[:16]>` |
+| database write | the transcript is fully redacted in memory first, then written in one transaction; a failure rolls back and removes only a database created by that run |
+
+The rule path can be overridden with `INFINITY_CONTEXT_REDACT_RULES`, which is also how
+the regression tests exercise a broken rule file without touching the installed copy.
 
 ### Path and permission rules
 

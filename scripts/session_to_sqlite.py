@@ -2,7 +2,7 @@
 # session_to_sqlite.py - 会话 JSONL 转换为 SQLite（支持 FTS5 全文检索）
 # 调用：python session_to_sqlite.py --session-key KEY --session-file FILE --output-dir DIR [--append]
 # 作者：Pondsi
-# 版本：v2.4 (2026-09-09)
+# 版本：v2.5 (2026-09-09)
 
 import json
 import sqlite3
@@ -11,6 +11,7 @@ import os
 import re
 import argparse
 import tempfile
+import hashlib
 
 # T09 (v2.4): 归档目录/文件强制 owner-only 权限（同目录模块，随包分发）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +21,10 @@ import secure_fs  # noqa: E402
 # 只有显式 --allow-insecure-storage 才降级为警告继续，并在结果中如实标注。
 _ALLOW_INSECURE_STORAGE = False
 _INSECURE_WARNINGS: list = []
+
+
+class RedactionConfigError(RuntimeError):
+    """脱敏规则不可信：必须中止，绝不写入未经脱敏的数据。"""
 
 
 def _harden(action, label):
@@ -35,40 +40,52 @@ def _harden(action, label):
         raise
 
 
-def _abort_unsecured(db_path, conn, exc):
-    """Fail-Closed 回滚：先释放 SQLite 句柄（Windows 下否则文件被锁无法删除），
-    再销毁未受保护的产物，最后以非零码退出。"""
+def _abort_unsecured(db_path, conn, is_new_db, exc):
+    """Fail-Closed 回滚。
+
+    先回滚/关闭 SQLite 句柄（Windows 下否则文件被锁无法删除），再**仅**销毁本次
+    新建的数据库与旁文件——追加模式下的历史归档绝不能被删除。
+    """
     if conn is not None:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         try:
             conn.close()
         except Exception:
             pass
-    for target in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
-        try:
-            if target and os.path.exists(target):
-                os.remove(target)
-        except OSError:
-            pass
+    if is_new_db:
+        for target in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
+            try:
+                if target and os.path.exists(target):
+                    os.remove(target)
+            except OSError:
+                pass
     print(json.dumps({
         'status': 'error',
         'mode': 'archive',
-        'error': f'aborted: owner-only permissions could not be enforced ({exc})'
+        'error': f'aborted: {exc}',
+        'removed_new_db': bool(is_new_db)
     }))
-    sys.exit(3)
+    sys.exit(6)
 
 
 # ============================================================================
-# T09 安全修复（v2.2）：脱敏 + 数据最小化
-#   - 脱敏规则可插拔：同目录下 redact_rules.json 存在时覆盖/追加默认规则
-#   - 所有派生字段（keywords/anchor/summary）均从“已脱敏文本”派生
-#   - 入库前对每个文本列再做一次最终脱敏
-#   - 超长原文掐头去尾（MAX_ARCHIVE_LENGTH），落实数据最小化原则
+# T09 安全修复（v2.5）：脱敏链路全链路 Fail-Closed + 数据最小化
+#   - 规则文件损坏 / 字段类型错误 / 正则无法编译 → 启动即中止（不建库、不写文件）
+#   - 正则启动期预编译；运行期替换失败同样中止，绝不 continue 跳过
+#   - session_key 在任何路径/文件名生成之前完成净化（白名单直通，否则脱敏+不透明哈希）
+#   - 先在内存完成全量脱敏，再建库并在单事务内写入；失败回滚且不误删历史库
+#   - 超长原文掐头去尾（MAX_ARCHIVE_LENGTH），兼顾数据最小化与 ReDoS 防护
 # ============================================================================
 
 # 本地存档最大字符数（掐头去尾），防止无限制存储
 MAX_ARCHIVE_LENGTH = 20000
 # 单条消息最大字符数（防止单条巨文本绕过总量限制）
 MAX_MESSAGE_CHARS = 8000
+# session_key 安全白名单：符合则原样使用（仍会过一遍脱敏），否则替换为不透明标识
+SESSION_KEY_SAFE_RE = re.compile(r'^[A-Za-z0-9:_\-.@]{1,128}$')
 
 DEFAULT_REDACT_RULES = [
     # OpenAI 风格 API Key
@@ -101,40 +118,108 @@ DEFAULT_REDACT_RULES = [
     (r'([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', '[EMAIL_REDACTED]'),
 ]
 
+# 启动期预编译后的规则：(已编译正则, 替换串)
+_COMPILED_RULES = None
+
+
+def _rules_path():
+    """规则文件位置：环境变量 INFINITY_CONTEXT_REDACT_RULES 优先，否则脚本同目录。"""
+    override = os.environ.get('INFINITY_CONTEXT_REDACT_RULES')
+    if override:
+        return os.path.abspath(override)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'redact_rules.json')
+
 
 def _load_redact_rules():
-    """加载同目录下 redact_rules.json（可选），支持自定义/追加脱敏规则。"""
-    rules = list(DEFAULT_REDACT_RULES)
-    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'redact_rules.json')
-    if not os.path.isfile(cfg_path):
-        return rules
-    try:
-        with open(cfg_path, 'r', encoding='utf-8') as f:
-            cfg = json.load(f)
-        custom = cfg.get('custom_redact_rules') or []
-        for item in custom:
+    """加载并**预编译**脱敏规则；任何问题都抛 RedactionConfigError（Fail-Closed）。
+
+    错误信息只包含索引与异常类型，不回显 pattern 内容（规则本身可能含敏感信息）。
+    """
+    raw = list(DEFAULT_REDACT_RULES)
+    cfg_path = _rules_path()
+
+    if os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path, 'r', encoding='utf-8-sig') as f:
+                cfg = json.load(f)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            raise RedactionConfigError(
+                f"redact_rules.json unreadable or malformed ({type(exc).__name__}); "
+                "aborting to avoid unredacted archiving"
+            ) from exc
+        if not isinstance(cfg, dict):
+            raise RedactionConfigError(
+                "redact_rules.json top-level structure must be an object; aborting")
+        custom = cfg.get('custom_redact_rules', [])
+        if custom is None:
+            custom = []
+        if not isinstance(custom, list):
+            raise RedactionConfigError("'custom_redact_rules' must be a list; aborting")
+        for idx, item in enumerate(custom):
+            if not isinstance(item, dict):
+                raise RedactionConfigError(f"custom rule #{idx} must be an object; aborting")
             pat = item.get('pattern')
             rep = item.get('replace', '[REDACTED]')
-            if isinstance(pat, str) and pat:
-                rules.append((pat, rep))
-    except Exception:
-        pass
-    return rules
+            if not isinstance(pat, str) or not pat:
+                raise RedactionConfigError(
+                    f"custom rule #{idx}: 'pattern' must be a non-empty string; aborting")
+            if not isinstance(rep, str):
+                raise RedactionConfigError(
+                    f"custom rule #{idx}: 'replace' must be a string; aborting")
+            raw.append((pat, rep))
+
+    compiled = []
+    for idx, (pat, rep) in enumerate(raw):
+        try:
+            compiled.append((re.compile(pat), rep))
+        except re.error as exc:
+            raise RedactionConfigError(
+                f"rule #{idx} failed to compile ({exc.msg} at position {exc.pos}); "
+                "aborting to avoid unredacted archiving"
+            ) from exc
+    return compiled
 
 
-_REDACT_RULES = _load_redact_rules()
+def _ensure_rules():
+    """惰性初始化并缓存预编译规则；失败时抛出 RedactionConfigError。"""
+    global _COMPILED_RULES
+    if _COMPILED_RULES is None:
+        _COMPILED_RULES = _load_redact_rules()
+    return _COMPILED_RULES
 
 
 def redact_sensitive_info(text):
-    """遮蔽常见敏感凭据 / PII 格式（API Key、Token、密码、私钥、连接串、Webhook、手机号、邮箱）"""
+    """遮蔽常见敏感凭据 / PII 格式（API Key、Token、密码、私钥、连接串、Webhook、手机号、邮箱）。
+
+    规则已在启动期预编译；运行期替换失败同样抛出，绝不静默跳过。
+    """
     if not text:
         return text
-    for pattern, replacement in _REDACT_RULES:
+    rules = _ensure_rules()
+    for idx, (pattern, replacement) in enumerate(rules):
         try:
-            text = re.sub(pattern, replacement, text)
-        except re.error:
-            continue
+            text = pattern.sub(replacement, text)
+        except re.error as exc:
+            raise RedactionConfigError(
+                f"rule #{idx} failed at application time ({type(exc).__name__}); "
+                "aborting redaction"
+            ) from exc
     return text
+
+
+def sanitize_session_key(raw_key):
+    """在任何路径/文件名生成之前净化 session_key。
+
+    1. 白名单格式（字母数字与 :_- .@）且脱敏后不变 → 原样使用；
+    2. 否则（含敏感内容或不安全字符）→ 不透明哈希，原文绝不落盘/入库/入 FTS。
+    """
+    if not isinstance(raw_key, str) or not raw_key.strip():
+        raise ValueError("session_key must be a non-empty string")
+    if SESSION_KEY_SAFE_RE.match(raw_key):
+        if redact_sensitive_info(raw_key) == raw_key:
+            return raw_key
+    digest = hashlib.sha256(raw_key.encode('utf-8')).hexdigest()[:16]
+    return f"opaque-{digest}"
 
 
 def is_high_entropy(word):
@@ -217,162 +302,10 @@ def redact_file_in_place(path, allow_dir=None):
     _harden(lambda: secure_fs.secure_file(abs_target), 'redact-target-file')
     return len(redacted)
 
-def main():
-    parser = argparse.ArgumentParser(description='Convert session JSONL to SQLite with FTS5')
-    parser.add_argument('--session-key', required=False, help='Session key')
-    parser.add_argument('--session-file', required=False, help='Path to events.jsonl')
-    parser.add_argument('--output-dir', required=False, help='Output directory for SQLite files')
-    parser.add_argument('--append', action='store_true', help='Append to existing SQLite file')
-    parser.add_argument('--redact-file', help='Redact sensitive data in-place in the given file, then exit')
-    parser.add_argument('--allow-dir', default=None,
-                        help='with --redact-file: refuse any path outside this directory')
-    parser.add_argument('--allow-insecure-storage', action='store_true', default=False,
-                        help='DANGEROUS: keep archiving even if owner-only permissions '
-                             'cannot be enforced. Only for trusted single-user filesystems.')
-    args = parser.parse_args()
 
-    global _ALLOW_INSECURE_STORAGE
-    _ALLOW_INSECURE_STORAGE = bool(args.allow_insecure_storage)
-
-    # T09 安全修复（v2.2）：轨迹备份脱敏模式
-    if args.redact_file:
-        try:
-            n = redact_file_in_place(args.redact_file, allow_dir=args.allow_dir)
-            print(json.dumps({'status': 'ok', 'mode': 'redact-file', 'bytes': n}))
-        except Exception as e:
-            print(json.dumps({'status': 'error', 'mode': 'redact-file', 'error': str(e)}))
-            sys.exit(1)
-        return
-
-    if not (args.session_key and args.session_file and args.output_dir):
-        parser.error('--session-key, --session-file and --output-dir are required unless --redact-file is used')
-
-    session_key = args.session_key
-    session_file = args.session_file
-    output_dir = args.output_dir
-    append_mode = args.append
-
-    # T09：归档目录强制 owner-only（不存在则创建，已存在则收紧/拒绝）
-    try:
-        permissions_enforced = _harden(
-            lambda: secure_fs.secure_directory(output_dir), 'archive-directory')
-    except secure_fs.UnsafeArchiveError as exc:
-        print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
-        sys.exit(3)
-
-    # Generate SQLite filename
-    safe_key = re.sub(r'[^a-zA-Z0-9_-]', '_', session_key)
-
-    # Use ASCII-safe path for SQLite (avoid Chinese characters in path)
-    # Python sqlite3 has issues with non-ASCII paths on Windows
-    # Use a fallback ASCII directory if the path contains non-ASCII
-    try:
-        output_dir.encode('ascii')
-    except UnicodeEncodeError:
-        # Path contains non-ASCII, use fallback
-        ascii_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sqlite-data')
-        try:
-            ascii_ok = _harden(
-                lambda: secure_fs.secure_directory(ascii_dir), 'archive-directory-fallback')
-        except secure_fs.UnsafeArchiveError as exc:
-            print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
-            sys.exit(3)
-        permissions_enforced = bool(permissions_enforced and ascii_ok)
-        output_dir = ascii_dir
-
-    if append_mode:
-        # Find existing SQLite file (first one)
-        existing = sorted([f for f in os.listdir(output_dir) if f.startswith(safe_key) and f.endswith('.db')])
-        if existing:
-            db_path = os.path.join(output_dir, existing[0])
-        else:
-            from datetime import datetime
-            stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
-    else:
-        from datetime import datetime
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
-
-    # Find Python executable
-    python_exe = 'python'
-    if not os.path.exists(python_exe):
-        python_exe = sys.executable
-
-    # T09：数据库文件以 0600 原子创建（Windows 下随后收紧 ACL），再连接
-    try:
-        _harden(lambda: secure_fs.secure_file(db_path), 'database-file')
-    except secure_fs.UnsafeArchiveError as exc:
-        _abort_unsecured(db_path, None, exc)
-
-    # Create SQLite connection
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    # Enable WAL mode
-    cursor.execute('PRAGMA journal_mode = WAL')
-    cursor.execute('PRAGMA busy_timeout = 5000')
-    cursor.execute('PRAGMA synchronous = NORMAL')
-
-    # T09：WAL 模式会产生 -wal/-shm 旁文件，一并收紧（失败即回滚）
-    try:
-        _harden(lambda: secure_fs.secure_sidecars(db_path), 'wal-sidecars')
-    except secure_fs.UnsafeArchiveError as exc:
-        _abort_unsecured(db_path, conn, exc)
-
-    # Create main table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS session_chunks (
-        chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_key TEXT NOT NULL,
-        start_msg_id INTEGER NOT NULL,
-        end_msg_id INTEGER NOT NULL,
-        summary TEXT NOT NULL,
-        keywords TEXT NOT NULL,
-        anchor_questions TEXT NOT NULL DEFAULT '',
-        raw_content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-
-    # Add anchor_questions column if missing
-    try:
-        cursor.execute('ALTER TABLE session_chunks ADD COLUMN anchor_questions TEXT NOT NULL DEFAULT ""')
-    except:
-        pass
-
-    # Create FTS5 virtual table
-    cursor.execute('''
-    CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
-        chunk_id UNINDEXED,
-        session_key,
-        keywords,
-        summary,
-        anchor_questions,
-        raw_content,
-        tokenize = 'trigram'
-    )
-    ''')
-
-    # Create trigger for auto-sync
-    cursor.execute('''
-    CREATE TRIGGER IF NOT EXISTS after_chunk_insert AFTER INSERT ON session_chunks BEGIN
-        INSERT INTO chunk_fts(chunk_id, session_key, keywords, summary, anchor_questions, raw_content)
-        VALUES (new.chunk_id, new.session_key, new.keywords, new.summary, new.anchor_questions, new.raw_content);
-    END
-    ''')
-
-    # Create indexes
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_session_key ON session_chunks(session_key)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON session_chunks(created_at)')
-    try:
-        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_chunk_unique ON session_chunks(session_key, start_msg_id, end_msg_id)')
-    except:
-        pass
-
-    # Read JSONL
+def read_messages(session_file):
+    """解析轨迹 JSONL；BOM 由 utf-8-sig 透明吞掉。"""
     messages = []
-    # utf-8-sig 透明吞掉 BOM：否则带 BOM 的轨迹首行 JSON 会被静默丢弃
     with open(session_file, 'r', encoding='utf-8-sig') as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
@@ -380,61 +313,57 @@ def main():
                 continue
             try:
                 data = json.loads(line)
-                msg_type = data.get('type', 'unknown')
-                message = data.get('message', {})
-                if not message:
-                    message = data.get('data', {}).get('message', data.get('data', {}))
-                role = message.get('role', 'unknown')
-                content = message.get('content', '')
-                timestamp = data.get('ts', data.get('timestamp', ''))
-
-                content_text = ''
-                has_thinking = 0
-                has_tool_calls = 0
-
-                if isinstance(content, str):
-                    content_text = content
-                elif isinstance(content, list):
-                    for item in content:
-                        if isinstance(item, dict):
-                            if item.get('type') == 'text':
-                                content_text += item.get('text', '')
-                            elif item.get('type') == 'thinking':
-                                has_thinking = 1
-                            elif item.get('type') == 'toolCall':
-                                has_tool_calls = 1
-
-                if content_text:
-                    messages.append({
-                        'id': line_num,
-                        'role': role,
-                        'content': content_text,
-                        'timestamp': timestamp,
-                        'has_thinking': has_thinking,
-                        'has_tool_calls': has_tool_calls
-                    })
             except json.JSONDecodeError:
                 continue
+            message = data.get('message', {})
+            if not message:
+                message = data.get('data', {}).get('message', data.get('data', {}))
+            role = message.get('role', 'unknown')
+            content = message.get('content', '')
+            timestamp = data.get('ts', data.get('timestamp', ''))
 
-    # Get max chunk_id for append mode
-    max_chunk_id = 0
-    if append_mode:
-        cursor.execute('SELECT MAX(chunk_id) FROM session_chunks WHERE session_key = ?', (session_key,))
-        result = cursor.fetchone()
-        if result and result[0]:
-            max_chunk_id = result[0]
+            content_text = ''
+            has_thinking = 0
+            has_tool_calls = 0
+            if isinstance(content, str):
+                content_text = content
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get('type') == 'text':
+                            content_text += item.get('text', '')
+                        elif item.get('type') == 'thinking':
+                            has_thinking = 1
+                        elif item.get('type') == 'toolCall':
+                            has_tool_calls = 1
 
-    # Chunk messages (10 per chunk)
+            if content_text:
+                messages.append({
+                    'id': line_num,
+                    'role': role,
+                    'content': content_text,
+                    'timestamp': timestamp,
+                    'has_thinking': has_thinking,
+                    'has_tool_calls': has_tool_calls
+                })
+    return messages
+
+
+def build_records(session_key, messages):
+    """在内存中完成分块 + 脱敏 + 派生字段。
+
+    此函数在任何数据库/文件创建之前调用；任何 RedactionConfigError 都会向上抛出，
+    调用方随即中止，因此不会留下半脱敏的数据。
+    """
+    records = []
     chunk_size = 10
     for i in range(0, len(messages), chunk_size):
         chunk = messages[i:i+chunk_size]
         if not chunk:
             continue
-
         start_msg_id = chunk[0]['id']
         end_msg_id = chunk[-1]['id']
 
-        # T09 安全修复（v2.2）：先对整块消息脱敏，再从脱敏后的文本派生一切元数据
         safe_chunk = []
         for msg in chunk:
             safe_msg = dict(msg)
@@ -457,7 +386,6 @@ def main():
                 summary_parts.append('thinking')
             if has_tool_calls:
                 summary_parts.append('tool_calls')
-
             summary = ', '.join(summary_parts) if summary_parts else 'dialogue'
 
             keywords = set()
@@ -478,7 +406,9 @@ def main():
                 for m in re.finditer(r'[\u4e00-\u9fa5]{2,6}', content):
                     anchor_set.add(m.group())
             anchor_questions = ', '.join(list(anchor_set)[:8])
-        except Exception as e:
+        except RedactionConfigError:
+            raise
+        except Exception:
             summary = 'dialogue (metadata error)'
             keywords_str = ''
             anchor_questions = ''
@@ -493,27 +423,196 @@ def main():
         anchor_questions = redact_sensitive_info(anchor_questions)
         raw_content = redact_sensitive_info(raw_content)
 
-        cursor.execute('''
-            INSERT OR IGNORE INTO session_chunks (session_key, start_msg_id, end_msg_id, summary, keywords, anchor_questions, raw_content)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (session_key, start_msg_id, end_msg_id, summary, keywords_str, anchor_questions, raw_content))
+        records.append((
+            session_key, start_msg_id, end_msg_id,
+            summary, keywords_str, anchor_questions, raw_content
+        ))
+    return records
 
-    conn.commit()
-    cursor.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-    # T09：checkpoint 可能重建旁文件，收尾再收紧一次
+
+def main():
+    parser = argparse.ArgumentParser(description='Convert session JSONL to SQLite with FTS5')
+    parser.add_argument('--session-key', required=False, help='Session key')
+    parser.add_argument('--session-file', required=False, help='Path to events.jsonl')
+    parser.add_argument('--output-dir', required=False, help='Output directory for SQLite files')
+    parser.add_argument('--append', action='store_true', help='Append to existing SQLite file')
+    parser.add_argument('--redact-file', help='Redact sensitive data in-place in the given file, then exit')
+    parser.add_argument('--allow-dir', default=None,
+                        help='with --redact-file: refuse any path outside this directory')
+    parser.add_argument('--allow-insecure-storage', action='store_true', default=False,
+                        help='DANGEROUS: keep archiving even if owner-only permissions '
+                             'cannot be enforced. Only for trusted single-user filesystems.')
+    args = parser.parse_args()
+
+    global _ALLOW_INSECURE_STORAGE
+    _ALLOW_INSECURE_STORAGE = bool(args.allow_insecure_storage)
+
+    # 阶段 0：脱敏引擎必须在任何文件/数据库操作之前就绪（Fail-Closed）
     try:
-        _harden(lambda: secure_fs.secure_sidecars(db_path), 'wal-sidecars-final')
-    except secure_fs.UnsafeArchiveError as exc:
-        _abort_unsecured(db_path, conn, exc)
+        _ensure_rules()
+    except RedactionConfigError as exc:
+        print(json.dumps({'status': 'error', 'mode': 'startup', 'error': str(exc)}))
+        sys.exit(2)
 
-    # Statistics
-    cursor.execute('SELECT COUNT(*) FROM session_chunks WHERE session_key = ?', (session_key,))
-    total_chunks = cursor.fetchone()[0]
-    cursor.execute('SELECT MIN(chunk_id), MAX(chunk_id) FROM session_chunks WHERE session_key = ?', (session_key,))
-    min_id, max_id = cursor.fetchone()
-    cursor.execute('SELECT MIN(start_msg_id), MAX(end_msg_id) FROM session_chunks WHERE session_key = ?', (session_key,))
-    min_msg, max_msg = cursor.fetchone()
-    conn.close()
+    # 轨迹备份脱敏模式
+    if args.redact_file:
+        try:
+            n = redact_file_in_place(args.redact_file, allow_dir=args.allow_dir)
+            print(json.dumps({'status': 'ok', 'mode': 'redact-file', 'bytes': n}))
+        except Exception as e:
+            print(json.dumps({'status': 'error', 'mode': 'redact-file', 'error': str(e)}))
+            sys.exit(1)
+        return
+
+    if not (args.session_key and args.session_file and args.output_dir):
+        parser.error('--session-key, --session-file and --output-dir are required unless --redact-file is used')
+
+    # 阶段 1：先净化 session_key（在任何路径 / 文件名生成之前）
+    try:
+        session_key = sanitize_session_key(args.session_key)
+    except (ValueError, RedactionConfigError) as exc:
+        print(json.dumps({'status': 'error', 'phase': 'init_key', 'error': str(exc)}))
+        sys.exit(3)
+
+    session_file = args.session_file
+    output_dir = args.output_dir
+    append_mode = args.append
+
+    # 阶段 2：读取轨迹并在内存中完成全量脱敏（此时尚未创建任何数据库文件）
+    try:
+        messages = read_messages(session_file)
+    except OSError as exc:
+        print(json.dumps({'status': 'error', 'mode': 'archive',
+                          'error': f'cannot read transcript: {exc}'}))
+        sys.exit(4)
+    try:
+        records = build_records(session_key, messages)
+    except RedactionConfigError as exc:
+        print(json.dumps({'status': 'error', 'mode': 'archive',
+                          'error': f'redaction aborted: {exc}'}))
+        sys.exit(5)
+
+    # 阶段 3：归档目录强制 owner-only（不存在则创建，已存在则收紧/拒绝）
+    try:
+        permissions_enforced = _harden(
+            lambda: secure_fs.secure_directory(output_dir), 'archive-directory')
+    except secure_fs.UnsafeArchiveError as exc:
+        print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
+        sys.exit(3)
+
+    # 文件名只由已净化的 key 生成（安全字符集，不会泄漏敏感信息）
+    safe_key = re.sub(r'[^a-zA-Z0-9_-]', '_', session_key)
+
+    # Use ASCII-safe path for SQLite (avoid Chinese characters in path)
+    # Python sqlite3 has issues with non-ASCII paths on Windows
+    # Use a fallback ASCII directory if the path contains non-ASCII
+    try:
+        output_dir.encode('ascii')
+    except UnicodeEncodeError:
+        # Path contains non-ASCII, use fallback
+        ascii_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sqlite-data')
+        try:
+            ascii_ok = _harden(
+                lambda: secure_fs.secure_directory(ascii_dir), 'archive-directory-fallback')
+        except secure_fs.UnsafeArchiveError as exc:
+            print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
+            sys.exit(3)
+        permissions_enforced = bool(permissions_enforced and ascii_ok)
+        output_dir = ascii_dir
+
+    from datetime import datetime
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+
+    if append_mode:
+        # Find existing SQLite file (first one)
+        existing = sorted([f for f in os.listdir(output_dir)
+                           if f.startswith(safe_key) and f.endswith('.db')])
+        if existing:
+            db_path = os.path.join(output_dir, existing[0])
+        else:
+            db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
+    else:
+        db_path = os.path.join(output_dir, f'{safe_key}-{stamp}.db')
+
+    # 关键：在任何文件创建之前记录该库是否为本轮新建——决定失败时能否物理删除
+    is_new_db = not os.path.exists(db_path)
+
+    # 阶段 4：建库 + 单事务写入（失败回滚；新建库才清理，历史库绝不动）
+    conn = None
+    try:
+        _harden(lambda: secure_fs.secure_file(db_path), 'database-file')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('PRAGMA journal_mode = WAL')
+        cursor.execute('PRAGMA busy_timeout = 5000')
+        cursor.execute('PRAGMA synchronous = NORMAL')
+        _harden(lambda: secure_fs.secure_sidecars(db_path), 'wal-sidecars')
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS session_chunks (
+            chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_key TEXT NOT NULL,
+            start_msg_id INTEGER NOT NULL,
+            end_msg_id INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            keywords TEXT NOT NULL,
+            anchor_questions TEXT NOT NULL DEFAULT '',
+            raw_content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        try:
+            cursor.execute('ALTER TABLE session_chunks ADD COLUMN anchor_questions TEXT NOT NULL DEFAULT ""')
+        except sqlite3.Error:
+            pass
+        cursor.execute('''
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
+            chunk_id UNINDEXED,
+            session_key,
+            keywords,
+            summary,
+            anchor_questions,
+            raw_content,
+            tokenize = 'trigram'
+        )
+        ''')
+        cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS after_chunk_insert AFTER INSERT ON session_chunks BEGIN
+            INSERT INTO chunk_fts(chunk_id, session_key, keywords, summary, anchor_questions, raw_content)
+            VALUES (new.chunk_id, new.session_key, new.keywords, new.summary, new.anchor_questions, new.raw_content);
+        END
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_session_key ON session_chunks(session_key)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON session_chunks(created_at)')
+        try:
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_chunk_unique ON session_chunks(session_key, start_msg_id, end_msg_id)')
+        except sqlite3.Error:
+            pass
+
+        # 单事务写入：全部记录要么全部落库，要么全部回滚
+        with conn:
+            cursor.executemany('''
+                INSERT OR IGNORE INTO session_chunks
+                    (session_key, start_msg_id, end_msg_id, summary, keywords, anchor_questions, raw_content)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', records)
+
+        cursor.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        _harden(lambda: secure_fs.secure_sidecars(db_path), 'wal-sidecars-final')
+
+        cursor.execute('SELECT COUNT(*) FROM session_chunks WHERE session_key = ?', (session_key,))
+        total_chunks = cursor.fetchone()[0]
+        cursor.execute('SELECT MIN(chunk_id), MAX(chunk_id) FROM session_chunks WHERE session_key = ?', (session_key,))
+        min_id, max_id = cursor.fetchone()
+        cursor.execute('SELECT MIN(start_msg_id), MAX(end_msg_id) FROM session_chunks WHERE session_key = ?', (session_key,))
+        min_msg, max_msg = cursor.fetchone()
+        conn.close()
+        conn = None
+    except secure_fs.UnsafeArchiveError as exc:
+        _abort_unsecured(db_path, conn, is_new_db, exc)
+    except (sqlite3.Error, OSError) as exc:
+        _abort_unsecured(db_path, conn, is_new_db, exc)
 
     result = {
         'status': 'ok',
@@ -527,6 +626,7 @@ def main():
         'warnings': list(_INSECURE_WARNINGS)
     }
     print(json.dumps(result, ensure_ascii=False))
+
 
 if __name__ == '__main__':
     main()
