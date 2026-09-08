@@ -57,13 +57,20 @@ The archive holds conversation history, so the store is owner-only by constructi
 | Layer | POSIX | Windows |
 |-------|-------|---------|
 | archive directory | `chmod 0700` | protected DACL: current user + LOCAL SYSTEM, inheritance removed |
-| database file | `0600`, created atomically with `os.open(..., 0o600)` | protected DACL granting the file itself (`F`, no `(OI)(CI)`) |
+| database file | `0600`, created atomically with `O_CREAT\|O_EXCL\|O_NOFOLLOW` | protected DACL granting the file itself (`F`, no `(OI)(CI)`) |
 | `-wal` / `-shm` | `0600` after the WAL pragma and again after the final checkpoint | inherits the protected directory DACL |
 
-Creating the file with `os.open(..., 0o600)` removes the check-then-chmod window in
-which a freshly created database could be world-readable (TOCTOU). A pre-existing
-archive directory owned by another account is refused outright; a directory that is
-merely too permissive is tightened. Windows ACLs are written with in-process Win32
-security API calls (`ctypes`), not by spawning `icacls`. If a filesystem cannot enforce
-owner-only access, the script prints a `SECURITY_WARN` and reports
-`permissions_enforced: false` in its JSON result instead of failing silently.
+Creating the file with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600` removes both the
+check-then-chmod window and the symlink race. A pre-existing archive directory owned by
+another account is refused outright; a directory that is merely too permissive is
+tightened; a symbolic link on the path is refused. Windows ACLs are written with
+in-process Win32 security API calls (`ctypes`), not by spawning `icacls`.
+
+The policy is **fail-closed**: if owner-only access cannot be enforced, the archiver
+aborts, destroys the half-written database and sidecars, and exits with code 3. The only
+opt-out is `--allow-insecure-storage`, which prints a warning and reports
+`insecure_storage: true` in the JSON result.
+
+In-place redaction writes through `tempfile.mkstemp` (kernel `O_EXCL`, 0600) in the
+target directory, `fsync`s before the atomic replace, cleans the temporary file on every
+failure path, and refuses symlinks and foreign-owned parent directories.

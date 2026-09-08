@@ -219,7 +219,7 @@ function Redact-TrajectoryFile([string]$EventsPath) {
         return $false
     }
     try {
-        $out = & $PyExe $pyScript '--redact-file' $EventsPath 2>&1 | Out-String
+        $out = & $PyExe $pyScript '--redact-file' $EventsPath '--allow-dir' $BackupDir 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             Write-Log "REDACT_FAIL_CLOSED: exit=$LASTEXITCODE - destroying artifact"
             Remove-Item -LiteralPath $EventsPath -Force -ErrorAction SilentlyContinue

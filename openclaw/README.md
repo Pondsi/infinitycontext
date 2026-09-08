@@ -65,6 +65,7 @@ openclaw gateway restart
 | No PATH hijacking (T07) | every external command is resolved to an absolute path from `System32` or a known install directory; the process `PATH` is narrowed at entry; `Resolve-TrustedExe` never falls back to a bare command name |
 | No shell string interpolation | commands run as executable + argument array; no shell interpreter, no `-Command` |
 | Fail-closed redaction | a trajectory backup is destroyed and the export aborted if redaction cannot run |
+| Fail-closed archive permissions | `session_to_sqlite.py` aborts, closes the SQLite handle and destroys the half-written database when owner-only permissions cannot be enforced; the wrapper passes `--allow-dir` so in-place redaction refuses any path outside the backup root |
 | Hook integrity | `handler.js` verifies `pipeline.ps1` against `integrity.json` (SHA-256), rejects symlinks/empty files, requires the script marker, and refuses to execute on mismatch |
 | Deny-by-default agents | the allowlist is fail-closed; an empty allowlist aborts, an unlisted agent is denied |
 | Declared auto-recovery | off unless `enableAutoWake` is set; one validated attempt per round; `WAKE_REQUEST` is logged before acting; no hidden retry loop |

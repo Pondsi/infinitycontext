@@ -3,6 +3,41 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.4.0 — 2026-09-09
+
+Fail-closed release. The archive now refuses to store readable data when it cannot
+prove owner-only access, and the in-place redactor no longer uses a predictable
+temporary file name.
+
+### Changed (breaking for filesystems that cannot enforce owner-only access)
+- **T09-1 — fail-closed permissions.** `secure_fs` no longer returns a "best effort"
+  success. Every hardening step either proves the owner-only result (POSIX mode is
+  re-read with `lstat`, ownership is checked) or raises `UnsafeArchiveError`.
+  `session_to_sqlite.py` reacts by closing the SQLite handle first, destroying the
+  half-written database and its `-wal`/`-shm` sidecars, and exiting with code 3.
+  The only opt-out is the explicit `--allow-insecure-storage` flag, which prints a
+  warning and reports `insecure_storage: true` in the JSON result.
+- Symbolic links on the target path (file or parent directory) are refused, and a
+  newly created archive directory is removed again if it cannot be secured.
+
+### Fixed
+- **T09-2 — predictable temporary file.** `redact_file_in_place` wrote to
+  `<name>.redact.tmp`, which an attacker could pre-create as a symlink. It now uses
+  `tempfile.mkstemp` (kernel `O_EXCL`, 0600) in the target directory, refuses symlinks
+  and foreign-owned parent directories, `fsync`s before the atomic replace, removes the
+  temporary file on every failure path, and re-applies owner-only permissions to the
+  final file. The OpenClaw integration passes `--allow-dir` so the engine refuses paths
+  outside the backup root.
+
+### License
+- The MIT license now carries an explicit **mandatory attribution** clause: any use of
+  the source, including modified variants, must credit Pondsi. The requirement is
+  repeated in `SKILL.md`, `README.md` (all languages) and `说明.md`.
+
+### Verified
+- Three rounds: static/security, functional (including fail-closed abort, symlink
+  refusal, temporary-file leftovers, BOM), and installed-copy end-to-end.
+
 ## 1.3.3 — 2026-09-09
 
 Robustness fix found while validating the published package end to end.

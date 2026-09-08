@@ -9,8 +9,17 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+2. ATTRIBUTION TO PONDSI IS MANDATORY. Using all or part of this source code,
+   including modified variants and derivative works, is permitted. Within the
+   limits allowed by applicable law, any use of this source code is permitted,
+   but Pondsi must always be credited as the original author. The credit must be
+   reasonably visible to the recipients of the work — for example in the README,
+   the documentation, the about screen, the package metadata, or the source file
+   headers — and must not be removed or obscured by modification, renaming, or
+   redistribution.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

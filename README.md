@@ -94,7 +94,9 @@ If you find this project helpful, consider supporting its development! See [SPON
 
 ### License
 
-MIT License
+MIT License with a **mandatory attribution requirement**: using all or part of the
+source, including modified variants, is permitted — but **Pondsi must always be
+credited as the original author**. See [LICENSE](LICENSE).
 
 ---
 
@@ -159,7 +161,8 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 
 ### 许可证
 
-MIT 许可证
+MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
+Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ---
 
@@ -187,7 +190,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### 許可證
 
-MIT 許可證
+MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
+Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ---
 
@@ -214,7 +218,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### ライセンス
 
-MIT ラ이センス
+MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
+Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ---
 
@@ -241,7 +246,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### 라이선스
 
-MIT 라이선스
+MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
+Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ---
 
@@ -268,7 +274,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### Licencia
 
-Licencia MIT
+MIT License with a **mandatory attribution requirement** — any use, including
+modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ---
 
@@ -295,7 +302,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### Licença
 
-Licença MIT
+MIT License with a **mandatory attribution requirement** — any use, including
+modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ---
 
@@ -322,7 +330,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### Licence
 
-Licence MIT
+MIT License with a **mandatory attribution requirement** — any use, including
+modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ---
 
@@ -349,7 +358,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### Lizenz
 
-MIT-Lizenz
+MIT License with a **mandatory attribution requirement** — any use, including
+modified variants, must credit **Pondsi**. See [LICENSE](LICENSE).
 
 ---
 
@@ -376,7 +386,8 @@ clawhub install infinitycontext --workdir ~/.agents --dir skills
 
 ### Лицензия
 
-Лицензия MIT
+MIT 许可证（附**强制署名条款**）：允许使用全部或部分源码（含修改后的变体），但**必须标注
+Pondsi 的署名**。详见 [LICENSE](LICENSE)。
 
 ## Security / 安全模型
 

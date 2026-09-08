@@ -2,7 +2,7 @@
 # session_to_sqlite.py - 会话 JSONL 转换为 SQLite（支持 FTS5 全文检索）
 # 调用：python session_to_sqlite.py --session-key KEY --session-file FILE --output-dir DIR [--append]
 # 作者：Pondsi
-# 版本：v2.3 (2026-09-09)
+# 版本：v2.4 (2026-09-09)
 
 import json
 import sqlite3
@@ -10,10 +10,51 @@ import sys
 import os
 import re
 import argparse
+import tempfile
 
-# T09 (v2.3): 归档目录/文件强制 owner-only 权限（同目录模块，随包分发）
+# T09 (v2.4): 归档目录/文件强制 owner-only 权限（同目录模块，随包分发）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import secure_fs  # noqa: E402
+
+# T09 权限策略（v2.4）：默认 Fail-Closed——无法保证 owner-only 即中止，
+# 只有显式 --allow-insecure-storage 才降级为警告继续，并在结果中如实标注。
+_ALLOW_INSECURE_STORAGE = False
+_INSECURE_WARNINGS: list = []
+
+
+def _harden(action, label):
+    """执行一次权限加固；失败时默认抛出，显式降级时记录警告并返回 False。"""
+    try:
+        action()
+        return True
+    except secure_fs.UnsafeArchiveError as exc:
+        if _ALLOW_INSECURE_STORAGE:
+            _INSECURE_WARNINGS.append(f"{label}: {exc}")
+            print(f"SECURITY_WARN: INSECURE_STORAGE {label}: {exc}", file=sys.stderr)
+            return False
+        raise
+
+
+def _abort_unsecured(db_path, conn, exc):
+    """Fail-Closed 回滚：先释放 SQLite 句柄（Windows 下否则文件被锁无法删除），
+    再销毁未受保护的产物，最后以非零码退出。"""
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    for target in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
+        try:
+            if target and os.path.exists(target):
+                os.remove(target)
+        except OSError:
+            pass
+    print(json.dumps({
+        'status': 'error',
+        'mode': 'archive',
+        'error': f'aborted: owner-only permissions could not be enforced ({exc})'
+    }))
+    sys.exit(3)
 
 
 # ============================================================================
@@ -121,18 +162,59 @@ def truncate_for_archive(text, limit=MAX_ARCHIVE_LENGTH):
     return f"{head}\n\n...[内容因数据最小化原则被截断，中间 {dropped} 字符未保存]...\n\n{tail}"
 
 
-def redact_file_in_place(path):
-    """对给定文件原地脱敏（供轨迹备份复用同一套规则），返回字节数。"""
-    with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
+def redact_file_in_place(path, allow_dir=None):
+    """对给定文件原地脱敏（供轨迹备份复用同一套规则），返回字节数。
+
+    T09-2：拒绝符号链接（目标与父目录）与外来账号目录；使用不可预测的
+    临时文件（mkstemp，内核 O_EXCL）消除可预测名与 TOCTOU；写入后 fsync；
+    替换前后均收紧权限；任何异常都不留临时文件。
+    """
+    abs_target = os.path.abspath(path)
+    parent = os.path.dirname(abs_target)
+
+    if os.path.islink(abs_target):
+        raise ValueError(f"refusing to redact a symbolic link: {abs_target}")
+    if os.path.islink(parent):
+        raise ValueError(f"refusing to redact inside a symbolic link directory: {parent}")
+    if not os.path.isfile(abs_target):
+        raise ValueError(f"not a regular file: {abs_target}")
+
+    getuid = getattr(os, 'getuid', None)
+    if getuid is not None and os.lstat(parent).st_uid != getuid():
+        raise ValueError(f"parent directory {parent} is owned by another account")
+
+    if allow_dir:
+        allowed = os.path.abspath(allow_dir)
+        try:
+            inside = os.path.commonpath([abs_target, allowed]) == allowed
+        except ValueError:
+            inside = False
+        if not inside:
+            raise ValueError(f"refusing to redact outside {allowed}: {abs_target}")
+
+    with open(abs_target, 'r', encoding='utf-8-sig', errors='replace') as f:
         data = f.read()
     redacted = redact_sensitive_info(data)
-    tmp = path + '.redact.tmp'
-    # T09：以 0600 原子创建临时文件，杜绝「先建后 chmod」的时间差
-    fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-        f.write(redacted)
-    os.replace(tmp, path)
-    secure_fs.secure_file(path)
+
+    # 同目录创建不可预测临时文件（mkstemp 内部使用 O_CREAT|O_EXCL，默认 0600）
+    fd, tmp_path = tempfile.mkstemp(
+        prefix='.infinity-redact-', suffix='.tmp', dir=parent, text=True
+    )
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(redacted)
+            f.flush()
+            os.fsync(f.fileno())
+        _harden(lambda: secure_fs.secure_file(tmp_path), 'redact-temp-file')
+        os.replace(tmp_path, abs_target)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+    _harden(lambda: secure_fs.secure_file(abs_target), 'redact-target-file')
     return len(redacted)
 
 def main():
@@ -142,12 +224,20 @@ def main():
     parser.add_argument('--output-dir', required=False, help='Output directory for SQLite files')
     parser.add_argument('--append', action='store_true', help='Append to existing SQLite file')
     parser.add_argument('--redact-file', help='Redact sensitive data in-place in the given file, then exit')
+    parser.add_argument('--allow-dir', default=None,
+                        help='with --redact-file: refuse any path outside this directory')
+    parser.add_argument('--allow-insecure-storage', action='store_true', default=False,
+                        help='DANGEROUS: keep archiving even if owner-only permissions '
+                             'cannot be enforced. Only for trusted single-user filesystems.')
     args = parser.parse_args()
+
+    global _ALLOW_INSECURE_STORAGE
+    _ALLOW_INSECURE_STORAGE = bool(args.allow_insecure_storage)
 
     # T09 安全修复（v2.2）：轨迹备份脱敏模式
     if args.redact_file:
         try:
-            n = redact_file_in_place(args.redact_file)
+            n = redact_file_in_place(args.redact_file, allow_dir=args.allow_dir)
             print(json.dumps({'status': 'ok', 'mode': 'redact-file', 'bytes': n}))
         except Exception as e:
             print(json.dumps({'status': 'error', 'mode': 'redact-file', 'error': str(e)}))
@@ -164,7 +254,8 @@ def main():
 
     # T09：归档目录强制 owner-only（不存在则创建，已存在则收紧/拒绝）
     try:
-        permissions_enforced = secure_fs.secure_directory(output_dir)
+        permissions_enforced = _harden(
+            lambda: secure_fs.secure_directory(output_dir), 'archive-directory')
     except secure_fs.UnsafeArchiveError as exc:
         print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
         sys.exit(3)
@@ -180,7 +271,12 @@ def main():
     except UnicodeEncodeError:
         # Path contains non-ASCII, use fallback
         ascii_dir = os.path.join(os.path.expanduser('~'), '.openclaw', 'sqlite-data')
-        ascii_ok = secure_fs.secure_directory(ascii_dir)
+        try:
+            ascii_ok = _harden(
+                lambda: secure_fs.secure_directory(ascii_dir), 'archive-directory-fallback')
+        except secure_fs.UnsafeArchiveError as exc:
+            print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
+            sys.exit(3)
         permissions_enforced = bool(permissions_enforced and ascii_ok)
         output_dir = ascii_dir
 
@@ -204,7 +300,10 @@ def main():
         python_exe = sys.executable
 
     # T09：数据库文件以 0600 原子创建（Windows 下随后收紧 ACL），再连接
-    secure_fs.secure_file(db_path)
+    try:
+        _harden(lambda: secure_fs.secure_file(db_path), 'database-file')
+    except secure_fs.UnsafeArchiveError as exc:
+        _abort_unsecured(db_path, None, exc)
 
     # Create SQLite connection
     conn = sqlite3.connect(db_path)
@@ -215,8 +314,11 @@ def main():
     cursor.execute('PRAGMA busy_timeout = 5000')
     cursor.execute('PRAGMA synchronous = NORMAL')
 
-    # T09：WAL 模式会产生 -wal/-shm 旁文件，一并收紧
-    secure_fs.secure_sidecars(db_path)
+    # T09：WAL 模式会产生 -wal/-shm 旁文件，一并收紧（失败即回滚）
+    try:
+        _harden(lambda: secure_fs.secure_sidecars(db_path), 'wal-sidecars')
+    except secure_fs.UnsafeArchiveError as exc:
+        _abort_unsecured(db_path, conn, exc)
 
     # Create main table
     cursor.execute('''
@@ -399,7 +501,10 @@ def main():
     conn.commit()
     cursor.execute('PRAGMA wal_checkpoint(TRUNCATE)')
     # T09：checkpoint 可能重建旁文件，收尾再收紧一次
-    secure_fs.secure_sidecars(db_path)
+    try:
+        _harden(lambda: secure_fs.secure_sidecars(db_path), 'wal-sidecars-final')
+    except secure_fs.UnsafeArchiveError as exc:
+        _abort_unsecured(db_path, conn, exc)
 
     # Statistics
     cursor.execute('SELECT COUNT(*) FROM session_chunks WHERE session_key = ?', (session_key,))
@@ -417,7 +522,9 @@ def main():
         'chunk_id_range': [min_id, max_id],
         'msg_id_range': [min_msg, max_msg],
         'append_mode': append_mode,
-        'permissions_enforced': bool(permissions_enforced)
+        'permissions_enforced': bool(permissions_enforced),
+        'insecure_storage': bool(_INSECURE_WARNINGS),
+        'warnings': list(_INSECURE_WARNINGS)
     }
     print(json.dumps(result, ensure_ascii=False))
 
