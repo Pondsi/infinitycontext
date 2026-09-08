@@ -23,10 +23,10 @@ Use a pinned revision and verify every digest before copying. Never copy with a 
 # 1. pinned checkout (audited release tag, never the mutable default branch)
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.7.0
+git checkout --detach v1.8.0
 
 # 2. the pinned tag must equal the version in SKILL.md frontmatter
-if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.7\.0"' -Quiet)) {
+if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.8\.0"' -Quiet)) {
     throw "tag/version mismatch - stop"
 }
 
@@ -75,6 +75,7 @@ openclaw gateway restart
 | Deny-by-default agents | the allowlist is fail-closed; an empty allowlist aborts, an unlisted agent is denied |
 | Declared auto-recovery | off unless `enableAutoWake` is set; one validated attempt per round; `WAKE_REQUEST` is logged before acting; no hidden retry loop |
 | No unsolicited notifications | over-limit, compaction failure and wake failure are log-only |
+| Bounded archive retention | the engine purges chunks older than `--retention-days` (default 30) on every run; the wrapper passes the flag through, and `INFINITY_CONTEXT_NO_ARCHIVE=1` in the environment stops the archiver before it writes anything |
 
 ## Files
 

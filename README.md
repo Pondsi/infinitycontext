@@ -70,6 +70,7 @@ InfinityContext is a **universal AI agent skill** that keeps your conversations 
 - 🔍 **FTS5 search**: Compressed sessions fully searchable via trigram index
 - 🛡️ **Triple coverage**: Manual, auto-compact, and watchdog — all paths protected
 - ⚡ **Deduplication**: 5-minute window prevents redundant backups
+- 🗓️ **Bounded retention**: the archive keeps a 30-day window by default (`--retention-days`, 1..3650) and purges expired chunks on every run; `INFINITY_CONTEXT_NO_ARCHIVE=1` disables archiving entirely
 
 ### Quick Start
 
@@ -81,19 +82,12 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 2. From source: pin the reviewed release tag, then verify every file
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.7.0
-grep -q '^version: "1.7.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.0
+grep -q '^version: "1.8.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 
-# 3. Copy exactly these files (never `cp -r`, never a wildcard)
-mkdir -p ~/.agents/skills/infinity-context/scripts
-mkdir -p ~/.agents/skills/infinity-context/references
-cp SKILL.md README.md 说明.md CHANGELOG.md SPONSORS.md LICENSE ~/.agents/skills/infinity-context/
-cp scripts/session_to_sqlite.py scripts/search.py scripts/cleanup.py scripts/secure_fs.py ~/.agents/skills/infinity-context/scripts/
-cp references/architecture.md references/languages.md ~/.agents/skills/infinity-context/references/
-
-# 4. Optional OpenClaw compaction automation: see openclaw/README.md
-# 5. Restart your host (dsh: restart dsh; OpenClaw: openclaw gateway restart)
+# 3. Optional OpenClaw compaction automation: see openclaw/README.md
+# 4. Restart your host (dsh: restart dsh; OpenClaw: openclaw gateway restart)
 ```
 
 ### How It Works
@@ -142,6 +136,7 @@ InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远�
 - 🔍 **FTS5 搜索**：压缩后的会话可通过三元组索引完整搜索
 - 🛡️ **三重覆盖**：手动、自动压缩、看门狗——所有路径受保护
 - ⚡ **去重机制**：5 分钟窗口避免重复备份
+- 🗓️ **保留期有界**：归档默认只保留 30 天（`--retention-days`，1..3650），每次运行清理过期片段；`INFINITY_CONTEXT_NO_ARCHIVE=1` 可彻底关闭归档
 
 ### 快速开始
 
@@ -153,16 +148,9 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw
 # 方式二：源码安装——固定已发布 tag（必须等于 SKILL.md 的 version），并逐文件校验
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.7.0
-grep -q '^version: "1.7.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.0
+grep -q '^version: "1.8.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
-
-# 逐文件显式复制（禁止 cp -r、禁止通配符）
-mkdir -p ~/.agents/skills/infinity-context/scripts
-mkdir -p ~/.agents/skills/infinity-context/references
-cp SKILL.md README.md 说明.md CHANGELOG.md SPONSORS.md LICENSE ~/.agents/skills/infinity-context/
-cp scripts/session_to_sqlite.py scripts/search.py scripts/cleanup.py scripts/secure_fs.py ~/.agents/skills/infinity-context/scripts/
-cp references/architecture.md references/languages.md ~/.agents/skills/infinity-context/references/
 
 # 可选 OpenClaw 压缩自动化：见 openclaw/README.md
 # 重启宿主（dsh：重启 dsh；OpenClaw：openclaw gateway restart）
@@ -219,11 +207,7 @@ InfinityContext 是一個 AI Agent Skill，解決小模型（128K 上下文）�
 
 ### 快速開始
 
-```bash
-# Registry install (scanned artifact, no git, no build step)
-clawhub install infinitycontext --workdir ~/.agents --dir skills
-# From source: pin the reviewed release tag and verify checksums.txt - see "Quick Start" above
-```
+> **安裝 / Install**: `clawhub install infinitycontext` — full steps in [Quick Start](#quick-start) above. The archive keeps a bounded 30-day window by default.
 
 ### 安全性與隱私
 

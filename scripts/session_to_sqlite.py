@@ -10,6 +10,7 @@ import sqlite3
 import sys
 import os
 import re
+import stat
 import argparse
 import tempfile
 import hashlib
@@ -91,6 +92,12 @@ MAX_LINE_BYTES = 1 * 1024 * 1024           # 单行（单条消息）上限 1 Mi
 MAX_MESSAGES = 200000                      # 单次摄入消息条数上限
 MAX_TOTAL_CHARS = 64 * 1024 * 1024         # 累计正文字符上限
 MAX_REDACT_FILE_BYTES = 64 * 1024 * 1024   # 原地脱敏单文件上限
+
+# v2.7（1.8.0）：保留期上限——归档不再是无限期累积。每次摄入都会清掉超过
+# 保留期的旧片段；0 表示无限期保留，必须显式 --allow-unbounded-retention。
+DEFAULT_RETENTION_DAYS = 30
+MAX_RETENTION_DAYS = 3650
+ARCHIVE_DISABLE_ENV = 'INFINITY_CONTEXT_NO_ARCHIVE'
 
 # T09 (v2.7): 归档身份标记——cleanup.py 只对带此标记的目录执行删除
 MARKER_NAME = '.infinity-context-archive'
@@ -384,6 +391,91 @@ def ensure_archive_marker(archive_dir):
     return marker
 
 
+def verify_archive_marker(archive_dir):
+    """校验目录确实属于本技能（owner-only 标记文件），否则拒绝写入/清理。
+
+    v2.7：保留期清理同样只作用于带标记的归档目录，因此误把 --output-dir
+    指向别人的目录时，绝不会去删人家的数据库行。
+    """
+    marker = os.path.join(archive_dir, MARKER_NAME)
+    try:
+        st = os.lstat(marker)
+    except OSError as exc:
+        raise secure_fs.UnsafeArchiveError(
+            f'archive marker missing ({MARKER_NAME}); refusing to touch this directory')
+    if os.path.islink(marker) or not stat.S_ISREG(st.st_mode):
+        raise secure_fs.UnsafeArchiveError('archive marker is not a regular file')
+    try:
+        with open(marker, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        raise secure_fs.UnsafeArchiveError(f'archive marker unreadable: {exc}')
+    if not isinstance(data, dict) or data.get('app') != MARKER_APP:
+        raise secure_fs.UnsafeArchiveError('archive marker app id mismatch')
+    return marker
+
+
+def purge_expired(cursor, retention_days):
+    """删除超过保留期的归档片段（含 FTS 镜像），返回删除条数。
+
+    v2.7：保留期是真正的上限，而不是“文档里写的建议”——每次摄入与
+    ``--purge-only`` 都会执行，超出保留期的片段不会留在磁盘上。
+    ``retention_days <= 0`` 表示不清理（调用方必须先通过显式开关）。
+    """
+    if retention_days <= 0:
+        return 0
+    cursor.execute(
+        "SELECT chunk_id FROM session_chunks WHERE created_at < datetime('now', ?)",
+        (f'-{int(retention_days)} days',))
+    ids = [row[0] for row in cursor.fetchall()]
+    if not ids:
+        return 0
+    for start in range(0, len(ids), 500):
+        batch = ids[start:start + 500]
+        placeholders = ','.join('?' * len(batch))
+        cursor.execute(f'DELETE FROM chunk_fts WHERE chunk_id IN ({placeholders})', batch)
+        cursor.execute(f'DELETE FROM session_chunks WHERE chunk_id IN ({placeholders})', batch)
+    return len(ids)
+
+
+def purge_only(output_dir, retention_days):
+    """对归档目录内每个 InfinityContext 数据库执行一次保留期清理。
+
+    只处理：目录带标记 + 文件名以 .db 结尾 + 只读校验过 session_chunks/
+    chunk_fts 结构。第三方数据库绝不会被打开写入。
+    """
+    verify_archive_marker(output_dir)
+    targets = sorted(
+        os.path.join(output_dir, name)
+        for name in os.listdir(output_dir)
+        if name.endswith('.db')
+        and not os.path.islink(os.path.join(output_dir, name))
+        and os.path.isfile(os.path.join(output_dir, name))
+    )
+    report = []
+    total_purged = 0
+    for db_path in targets:
+        conn = sqlite3.connect(f'file:{db_path}?mode=rw', uri=True)
+        try:
+            cursor = conn.cursor()
+            names = {
+                row[0] for row in cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')")
+            }
+            if not {'session_chunks', 'chunk_fts'}.issubset(names):
+                report.append({'db': os.path.basename(db_path), 'skipped': 'not an infinity-context database'})
+                continue
+            with conn:
+                purged = purge_expired(cursor, retention_days)
+            total_purged += purged
+            report.append({'db': os.path.basename(db_path), 'purged_chunks': purged})
+        finally:
+            conn.close()
+    return {'status': 'ok', 'mode': 'purge-only', 'archive_dir': output_dir,
+            'retention_days': retention_days, 'purged_chunks': total_purged,
+            'databases': report}
+
+
 def read_messages(session_file, max_bytes=MAX_SESSION_BYTES,
                   max_line_bytes=MAX_LINE_BYTES, max_messages=MAX_MESSAGES,
                   max_total_chars=MAX_TOTAL_CHARS):
@@ -587,6 +679,15 @@ def main():
     parser.add_argument('--allow-insecure-storage', action='store_true', default=False,
                         help='DANGEROUS: keep archiving even if owner-only permissions '
                              'cannot be enforced. Only for trusted single-user filesystems.')
+    parser.add_argument('--retention-days', type=int, default=DEFAULT_RETENTION_DAYS,
+                        help='purge archived chunks older than N days on every run '
+                             f'(1..{MAX_RETENTION_DAYS}; 0 keeps them forever and requires '
+                             '--allow-unbounded-retention)')
+    parser.add_argument('--allow-unbounded-retention', action='store_true', default=False,
+                        help='DANGEROUS: allow --retention-days 0 (keep the archive forever)')
+    parser.add_argument('--purge-only', action='store_true', default=False,
+                        help='apply the retention policy to every archive database in '
+                             '--output-dir, then exit without ingesting anything')
     args = parser.parse_args()
 
     global _ALLOW_INSECURE_STORAGE
@@ -602,6 +703,14 @@ def main():
         ))
     except ValueError as exc:
         parser.error(str(exc))
+
+    # 阶段 -1.5：保留期必须是有界值；无限期保留需要显式开关
+    if args.retention_days == 0:
+        if not args.allow_unbounded_retention:
+            parser.error('--retention-days 0 keeps every chunk forever; pass '
+                         '--allow-unbounded-retention to accept unbounded local retention')
+    elif not 1 <= args.retention_days <= MAX_RETENTION_DAYS:
+        parser.error(f'--retention-days must be 0 or 1..{MAX_RETENTION_DAYS}')
 
     # 阶段 0：脱敏引擎必须在任何文件/数据库操作之前就绪（Fail-Closed）
     try:
@@ -625,6 +734,27 @@ def main():
         except Exception as e:
             print(json.dumps({'status': 'error', 'mode': 'redact-file', 'error': str(e)}))
             sys.exit(1)
+        return
+
+    # 保留期清理模式：只清理，不摄入（清理同样只作用于带标记的归档目录）
+    if args.purge_only:
+        if not args.output_dir:
+            parser.error('--output-dir is required with --purge-only')
+        try:
+            print(json.dumps(purge_only(args.output_dir, args.retention_days),
+                             ensure_ascii=False))
+        except secure_fs.UnsafeArchiveError as exc:
+            print(json.dumps({'status': 'error', 'mode': 'purge-only', 'error': str(exc)}))
+            sys.exit(3)
+        except (sqlite3.Error, OSError) as exc:
+            print(json.dumps({'status': 'error', 'mode': 'purge-only', 'error': str(exc)}))
+            sys.exit(4)
+        return
+
+    # 归档总开关：设 INFINITY_CONTEXT_NO_ARCHIVE=1 后本脚本不再写入任何归档
+    if os.environ.get(ARCHIVE_DISABLE_ENV, '').strip().lower() in ('1', 'true', 'yes', 'on'):
+        print(json.dumps({'status': 'disabled', 'mode': 'archive', 'archived': False,
+                          'reason': f'{ARCHIVE_DISABLE_ENV} is set'}, ensure_ascii=False))
         return
 
     if not (args.session_key and args.session_file and args.output_dir):
@@ -728,6 +858,7 @@ def main():
 
     # 阶段 4：建库 + 单事务写入（失败回滚；新建库才清理，历史库绝不动）
     conn = None
+    purged_chunks = 0
     try:
         _harden(lambda: secure_fs.secure_file(db_path), 'database-file')
         conn = sqlite3.connect(db_path)
@@ -779,8 +910,9 @@ def main():
         except sqlite3.Error:
             pass
 
-        # 单事务写入：全部记录要么全部落库，要么全部回滚
+        # 单事务写入：保留期清理与本次写入同属一个事务，要么全部生效，要么全部回滚
         with conn:
+            purged_chunks = purge_expired(cursor, args.retention_days)
             cursor.executemany('''
                 INSERT OR IGNORE INTO session_chunks
                     (session_key, start_msg_id, end_msg_id, summary, keywords, anchor_questions, raw_content)
@@ -815,6 +947,8 @@ def main():
         'archive_dir_fallback': archive_dir_fallback,
         'permissions_enforced': bool(permissions_enforced),
         'ingest': ingest,
+        'retention_days': args.retention_days,
+        'purged_chunks': purged_chunks,
         'insecure_storage': bool(_INSECURE_WARNINGS),
         'warnings': list(_INSECURE_WARNINGS)
     }

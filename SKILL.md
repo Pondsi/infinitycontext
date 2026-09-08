@@ -1,12 +1,12 @@
 ---
 name: infinity-context
-description: "Use when a long agent session is about to hit its context limit, when a detail from an earlier turn must be recalled exactly, or when past sessions should stay searchable offline. Compresses context, archives every conversation chunk into a local SQLite/FTS5 store with owner-only permissions, and retrieves exact details on demand. Ships two explicitly opt-in maintenance tools that change local files: a retention cleanup that permanently deletes expired archive files (verified archive marker + filename allowlist + --confirm-destructive), and an in-place redaction helper that rewrites a file only inside a declared --allow-dir. Works out of the box on DeepSeek Harness (dsh) and OpenClaw; also runs on Claude Code, Cursor, Dify, Ollama and any Agent Skills host."
+description: "Use when a long agent session is about to hit its context limit, when a detail from an earlier turn must be recalled exactly, or when past sessions should stay searchable offline. Compresses context, archives conversation chunks into a local SQLite/FTS5 store with owner-only permissions and a bounded 30-day retention window, and retrieves exact details on demand. Ships explicitly opt-in maintenance tools that change local files: a retention cleanup that permanently deletes expired archive files (verified archive marker + filename allowlist + --confirm-destructive), an ingest-time retention purge with --purge-only, an INFINITY_CONTEXT_NO_ARCHIVE=1 off switch, and an in-place redaction helper that rewrites a file only inside a declared --allow-dir. Works out of the box on DeepSeek Harness (dsh) and OpenClaw; also runs on Claude Code, Cursor, Dify, Ollama and any Agent Skills host."
 license: MIT
 compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh), OpenClaw, Claude Code, Cursor, Dify, Ollama, custom agents. Python 3.9+ standard library only. No network access, no shell commands, no subprocesses, no Windows-only dependency."
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.7.0"
+  version: "1.8.0"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -24,10 +24,13 @@ metadata:
 > | Permanently delete expired archive files | `cleanup.py` | verified archive marker + full-filename allowlist + non-recursive + `--apply --confirm-destructive` |
 > | Rewrite a file in place (redaction) | `session_to_sqlite.py --redact-file` | requires `--allow-dir`; symlink-resolved path must stay inside it |
 > | Move the archive when the path is not ASCII-safe | `session_to_sqlite.py` | **refused** unless `--allow-dir-fallback` is given |
+> | Enforce a bounded retention window (default **30 days**) | `session_to_sqlite.py` | `--retention-days 1..3650`; keeping chunks forever needs `--allow-unbounded-retention` |
+> | Disable archiving entirely | `session_to_sqlite.py` | env `INFINITY_CONTEXT_NO_ARCHIVE=1` — the script then writes nothing |
 >
 > Nothing is sent anywhere: no network, no telemetry, no cloud sync. Redaction is best-effort;
 > the archive still holds a detailed record of your sessions, so keep it out of synced or
-> shared folders and run cleanup deliberately.
+> shared folders and run cleanup deliberately. **Retention is bounded by default: chunks older
+> than 30 days are purged on every run, and `--purge-only` applies the same policy on demand.**
 >
 > **Installing this skill means accepting these local persistence and file-mutation
 > capabilities.**
@@ -56,24 +59,19 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.7.0
-grep -q '^version: "1.7.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.0
+grep -q '^version: "1.8.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
-
-mkdir -p ~/.agents/skills/infinity-context/scripts
-mkdir -p ~/.agents/skills/infinity-context/references
-cp SKILL.md README.md 说明.md CHANGELOG.md SPONSORS.md LICENSE ~/.agents/skills/infinity-context/
-cp scripts/session_to_sqlite.py scripts/search.py scripts/cleanup.py scripts/secure_fs.py ~/.agents/skills/infinity-context/scripts/
-cp references/architecture.md references/languages.md ~/.agents/skills/infinity-context/references/
 ```
+
+Then place the verified files into the skill directory exactly as listed in
+[`references/architecture.md`](references/architecture.md#file-layout) — the list is
+explicit, so no wildcard and no `cp -r` is ever needed.
 
 The pinned tag must equal the `version` in this file's frontmatter. The `grep`
 guard above stops the install when it does not, so a source install can never
 silently produce an older build than the reviewed artifact.
-
-Copy the files explicitly. Never `cp -r` the source tree: an audited package
-must not pick up unaudited files.
 
 ## Quick start on DeepSeek Harness (dsh)
 
@@ -137,8 +135,9 @@ instead of the context window.
 Before archiving a session for the first time in a given environment, the agent **must**
 tell the user that the conversation will be stored locally in a searchable archive, and
 obtain explicit confirmation. Do not archive silently. When a user asks to stop keeping
-history, run `cleanup.py --apply --confirm-destructive` (or delete the archive directory)
-and stop calling the archiver.
+history, set `INFINITY_CONTEXT_NO_ARCHIVE=1` (the archiver then writes nothing) and run
+`cleanup.py --apply --confirm-destructive` — or delete the archive directory. Retention is
+bounded by default (30 days), so history does not accumulate indefinitely.
 
 ## Security & privacy
 
@@ -147,6 +146,7 @@ and stop calling the archiver.
 - **Owner-only archive, fail-closed** — the archive directory is forced to `0700` and files to `0600` on POSIX; on Windows the DACL is replaced by a protected DACL granting only the current user and LOCAL SYSTEM. Every result is re-read to prove the mode took effect. New database files are created atomically with `O_CREAT | O_EXCL | O_NOFOLLOW` and `0600`, so no file ever exists with wider permissions. A symbolic link on the target path is refused. A pre-existing directory owned by another account is refused. If owner-only access cannot be enforced, archiving **aborts and the half-written database is destroyed** (`status: error`, exit 3) instead of storing readable data; `--allow-insecure-storage` is the only way to opt out, and the JSON result then reports `insecure_storage: true`.
 - **Fail-closed redaction** — before any text is stored, a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, cookies, webhooks, phone numbers and emails. Rules are validated and **precompiled at startup**: a malformed `redact_rules.json`, a wrong field type or an uncompilable regex aborts the run before any database is created, and a failure while applying a rule aborts instead of skipping it. `session_key` is sanitised **before** it is used for any path or filename — a value outside the safe identifier format (or one that itself looks sensitive) becomes an opaque hash, so it never reaches a filename, the table or the FTS index. The transcript is redacted entirely in memory, then written in a single transaction; on failure the transaction rolls back and only a database created by that same run is removed — an existing archive being appended to is never deleted. High-entropy candidates are excluded from the keyword index. In-place redaction (`--redact-file`) additionally **requires `--allow-dir`** and resolves every symbolic link before comparing paths: the lexical path, the resolved path and the resolved allowed directory must all agree, so a symlinked ancestor inside the allowed directory cannot redirect the write elsewhere. A non-ASCII output path is **refused** by default (exit 8); only an explicit `--allow-dir-fallback` moves the archive to the ASCII fallback directory, and the run then prints a warning and reports `archive_dir_fallback: true` together with `requested_dir` and `archive_dir` — the location is never changed silently.
 - **Data minimisation** — `MAX_ARCHIVE_LENGTH` truncates oversized content (head + tail kept) before storage. Ingestion itself is bounded **before** parsing: at most `--max-session-bytes` (64 MiB) is read from the head of the transcript, a line longer than `--max-line-bytes` (1 MiB) is discarded before JSON or any regex sees it, and ingestion stops at `--max-messages` (200000) or `--max-total-chars` (64 MiB). The result reports `ingest.truncated` and `ingest.truncated_reason`, so a bounded archive is never presented as a complete one. In-place redaction refuses a file larger than 64 MiB before reading it.
+- **Bounded retention, default 30 days** — archiving is not unbounded. Every run purges chunks older than `--retention-days` (default 30, range 1..3650) from `session_chunks` and its FTS mirror inside the same transaction, and reports the count as `purged_chunks`; `--purge-only --output-dir <dir>` applies the same policy to existing archives without ingesting, and only to a directory that carries the archive marker. Keeping chunks forever requires the explicit `--allow-unbounded-retention` flag. Set `INFINITY_CONTEXT_NO_ARCHIVE=1` to disable archiving entirely — the script writes no file and reports `status: disabled`.
 - **Deny-by-default filesystem rules** — `cleanup.py` refuses any directory that lacks the owner-only `.infinity-context-archive` marker, refuses protected directories (filesystem root, home, common user folders), only deletes files whose **full name** matches an InfinityContext artifact pattern, never recurses into subdirectories, re-checks each candidate with `lstat` immediately before deletion, validates the `session_chunks`/`chunk_fts` schema in read-only mode before any `VACUUM`, and does nothing unless **both** `--apply` and `--confirm-destructive` are given.
 
 ### Data sensitivity notice
@@ -182,7 +182,10 @@ pinned revision and checksums.
 | ingest message cap | 200000 (hard ceiling) | `--max-messages` (1..ceiling) |
 | ingest character cap | 64 MiB (hard ceiling) | `--max-total-chars` (1..ceiling) |
 | redaction rules | built in | `scripts/session_to_sqlite.py` (add `redact_rules.json` beside it to extend) |
-| retention | 30 days | `cleanup.py --days` (1..3650) |
+| retention (archive contents) | 30 days | `session_to_sqlite.py --retention-days` (1..3650; `0` needs `--allow-unbounded-retention`) |
+| manual retention pass | off | `session_to_sqlite.py --purge-only --output-dir <dir>` |
+| disable archiving | off | env `INFINITY_CONTEXT_NO_ARCHIVE=1` |
+| retention (archive files) | 30 days | `cleanup.py --days` (1..3650) |
 | archive marker | `.infinity-context-archive` | written by `session_to_sqlite.py`; `cleanup.py` refuses to run without it |
 | destructive cleanup | requires `--apply --confirm-destructive` | `cleanup.py` |
 | migrate an old archive | `cleanup.py --init-marker` | only after a valid database is found in the directory |
@@ -222,22 +225,12 @@ MIT with a **mandatory attribution requirement** — using all or part of the so
 
 ```bash
 # 方式一：注册表（已扫描产物，无需 git、无需构建）
-clawhub install infinitycontext --workdir ~/.agents --dir skills   # dsh / Claude Code
+clawhub install infinitycontext --workdir ~/.agents --dir skills    # dsh / Claude Code
 clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw 托管技能
-clawhub install infinitycontext --workdir <workspace> --dir skills  # OpenClaw 工作区技能（优先）
-
-# 方式二：源码（固定已审计 tag + 逐文件校验，禁止使用可变分支）
-git clone https://github.com/Pondsi/infinitycontext.git
-cd infinitycontext
-git checkout --detach v1.7.0
-grep -q '^version: "1.7.0"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
-sha256sum -c checksums.txt                # macOS：shasum -a 256 -c checksums.txt
-mkdir -p ~/.agents/skills/infinity-context/scripts
-mkdir -p ~/.agents/skills/infinity-context/references
-cp SKILL.md README.md 说明.md CHANGELOG.md SPONSORS.md LICENSE ~/.agents/skills/infinity-context/
-cp scripts/session_to_sqlite.py scripts/search.py scripts/cleanup.py scripts/secure_fs.py ~/.agents/skills/infinity-context/scripts/
-cp references/architecture.md references/languages.md ~/.agents/skills/infinity-context/references/
 ```
+
+方式二（源码安装：固定已审计 tag + 逐文件校验）见上方 [Install](#install)；
+需要复制的文件清单见 [`references/architecture.md`](references/architecture.md#file-layout)。
 
 **必须逐文件显式复制，禁止 `cp -r`**：被审计的包不得混入未审计文件。
 
@@ -270,6 +263,7 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 - **无 shell、无子进程**：核心脚本从不启动其它程序；Windows ACL 使用进程内 Win32 安全 API，不调用外部工具
 - **归档仅本人可读，且 Fail-Closed**：POSIX 目录 `0700`、文件 `0600`；Windows 用受保护 DACL 仅授权当前用户与 LOCAL SYSTEM；加固后**回读校验**是否真的生效；新数据库文件以 `O_CREAT|O_EXCL|O_NOFOLLOW` + `0600` **原子创建**；路径上出现符号链接即**拒绝**；预存目录若属于其它账号则**拒绝使用**；**无法强制 owner-only 时中止归档并销毁半成品**（`status: error`，退出码 3），绝不留下可读的明文；仅 `--allow-insecure-storage` 可显式降级，且结果中会标记 `insecure_storage: true`
 - **Fail-Closed 脱敏**：入库前屏蔽 API Key / Token / 密码 / JWT / 私钥 / 连接串 / Cookie / Webhook / 手机号 / 邮箱；规则**启动期校验并预编译**——`redact_rules.json` 损坏、字段类型错误或正则无法编译都会在**建库之前中止**，应用规则时出错也中止而非跳过；`session_key` 在**生成任何路径/文件名之前**先净化（不符合安全字符集或本身疑似敏感→不透明哈希），绝不进入文件名、表或 FTS；轨迹先在**内存中全量脱敏**，再在**单事务**内写入，失败则回滚且**只清理本轮新建的库**，追加模式下的历史归档绝不被删除；高熵候选不进入关键词索引；原地脱敏（`--redact-file`）**必须同时给出 `--allow-dir`**，且在比较路径前**解析全部符号链接**：词法路径、真实路径、真实允许目录三者必须一致，因此允许目录内部的符号链接祖先无法把写入重定向到别处；若因非 ASCII 路径回退到备用目录，会打印告警并在结果中给出 `archive_dir_fallback: true`、`requested_dir` 与 `archive_dir`——**绝不静默改道**
+- **保留期有界，默认 30 天**：归档不会无限累积。每次摄入都会在**同一事务**内删除超过 `--retention-days`（默认 30，范围 1..3650）的旧片段及其 FTS 镜像，并在结果中给出 `purged_chunks`；`--purge-only --output-dir <目录>` 可对既有归档执行同一策略（仅限带归档标记的目录，不摄入新数据）。要无限期保留必须显式 `--allow-unbounded-retention`。设置 `INFINITY_CONTEXT_NO_ARCHIVE=1` 可彻底关闭归档——脚本不写任何文件并返回 `status: disabled`。
 - **数据最小化**：`MAX_ARCHIVE_LENGTH` 掐头去尾截断
 - **默认拒绝的文件系统规则**：`cleanup.py` 只删归档目录内、白名单扩展名、非符号链接的文件，且必须显式 `--apply`
 
@@ -296,3 +290,7 @@ cp references/architecture.md references/languages.md ~/.agents/skills/infinity-
 ## 许可证
 
 MIT 许可证（附**强制署名条款**）——允许使用全部或部分源码（含修改后的变体），但**必须标注 Pondsi 的署名**。详见 [LICENSE](LICENSE)。
+
+---
+
+Pondsi (+MiMo-v2.5/v2.5pro+deepseek-v4-flash/pro+deepseek-v4.1-flash-expires-on-0910+GLM5.3-flash+Gemini3.1-pro+Qwen3.8-27b+Gemini3.8-flash) — automatically committed by Openclaw

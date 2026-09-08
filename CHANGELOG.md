@@ -3,6 +3,31 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.0 — 2026-09-09
+
+Bounded persistence: the archive now has a retention ceiling by default, an off switch,
+and a manual retention pass. Documentation stops duplicating install instructions.
+
+### Added
+- **Retention is enforced, not advised.** `session_to_sqlite.py --retention-days N`
+  (default **30**, range `1..3650`) deletes chunks older than `N` days from
+  `session_chunks` and its FTS mirror inside the same transaction as the insert, and
+  reports `purged_chunks` in the JSON result. Keeping chunks forever now requires the
+  explicit `--allow-unbounded-retention` flag; `0` without it is rejected.
+- **`--purge-only --output-dir <dir>`** applies the same retention policy to existing
+  archives without ingesting anything. It only touches a directory that carries the
+  owner-only archive marker, skips symlinked files, and skips any database that does not
+  contain both `session_chunks` and `chunk_fts` (reported as `skipped`).
+- **`INFINITY_CONTEXT_NO_ARCHIVE=1`** disables archiving entirely: the script writes no
+  file, creates no directory, and returns `status: disabled`.
+- `references/architecture.md` documents the exact file layout for a source install, so
+  the docs no longer repeat a copy block in every language.
+
+### Changed
+- Install instructions are consolidated into one canonical block per document; the
+  per-language sections point at it instead of repeating the same command list.
+- SKILL.md, README.md and 说明.md carry the attribution line at the very bottom.
+
 ## 1.7.0 — 2026-09-09
 
 Blast-radius containment for the destructive tools, plus capability disclosure.

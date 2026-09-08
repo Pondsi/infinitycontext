@@ -24,6 +24,28 @@ A 128K window is consumed by one deep reply: system prompt + tools (~30K), summa
 keeps the *working* context small; the archive keeps the *history* exact. When a detail
 from an earlier turn matters, the agent queries the archive instead of replaying it.
 
+### File layout
+
+A source install copies exactly these files into the skill directory; nothing else is
+needed and no wildcard should ever be used:
+
+| Destination | Files |
+|-------------|-------|
+| `<skill-dir>/` | `SKILL.md`, `README.md`, `说明.md`, `CHANGELOG.md`, `SPONSORS.md`, `LICENSE`, `checksums.txt` |
+| `<skill-dir>/scripts/` | `session_to_sqlite.py`, `search.py`, `cleanup.py`, `secure_fs.py` |
+| `<skill-dir>/references/` | `architecture.md`, `languages.md` |
+
+### Retention (bounded persistence)
+
+Archiving has a ceiling by default. Every run of `session_to_sqlite.py` deletes chunks older
+than `--retention-days` (default **30**, range `1..3650`) from `session_chunks` and its FTS
+mirror inside the same transaction as the insert, and reports the count as `purged_chunks`.
+`--purge-only --output-dir <dir>` applies the same policy to existing archives without
+ingesting; it requires the archive marker and skips any database lacking both
+`session_chunks` and `chunk_fts`. `--retention-days 0` keeps chunks forever but is rejected
+unless `--allow-unbounded-retention` is also given. Setting `INFINITY_CONTEXT_NO_ARCHIVE=1`
+disables archiving entirely — the script writes no file and returns `status: disabled`.
+
 ### Data model
 
 | Table | Purpose |
