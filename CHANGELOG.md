@@ -3,6 +3,28 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.0 — 2026-09-09
+
+Scope-and-transparency release. It addresses the two concerns the ClawHub reviewer
+raised in the 1.5.0 audit ("under-scoped file mutation" and "can silently store
+sensitive archives in an unexpected location").
+
+### Changed
+- **In-place redaction is scoped by construction.** `--redact-file` now refuses to run
+  unless `--allow-dir` is supplied (exit 7), so the engine can never modify a file
+  outside a directory the caller explicitly declares. The OpenClaw integration already
+  passes the backup root.
+- **The archive directory is never changed silently.** If a non-ASCII output path forces
+  the SQLite store into the fallback directory, the run prints
+  `SECURITY_WARN: ARCHIVE_DIR_FALLBACK` and the JSON result now carries `archive_dir`,
+  `requested_dir` and `archive_dir_fallback`, so the effective location is always
+  visible.
+
+### Verified
+- Regression suite extended with the `--allow-dir` requirement (refused without it,
+  accepted with it).
+- Three rounds: static/security, functional, and installed-copy end-to-end.
+
 ## 1.5.0 — 2026-09-09
 
 Fail-closed redaction. The audit found that the redaction path itself still contained

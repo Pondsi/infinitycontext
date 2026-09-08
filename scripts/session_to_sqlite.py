@@ -454,8 +454,15 @@ def main():
         print(json.dumps({'status': 'error', 'mode': 'startup', 'error': str(exc)}))
         sys.exit(2)
 
-    # 轨迹备份脱敏模式
+    # 轨迹备份脱敏模式（文件修改必须限定范围：--allow-dir 必填）
     if args.redact_file:
+        if not args.allow_dir:
+            print(json.dumps({
+                'status': 'error', 'mode': 'redact-file',
+                'error': '--allow-dir is required with --redact-file: '
+                         'file mutation must be scoped to a declared directory'
+            }))
+            sys.exit(7)
         try:
             n = redact_file_in_place(args.redact_file, allow_dir=args.allow_dir)
             print(json.dumps({'status': 'ok', 'mode': 'redact-file', 'bytes': n}))
@@ -477,6 +484,9 @@ def main():
     session_file = args.session_file
     output_dir = args.output_dir
     append_mode = args.append
+    # 记录用户请求的目录；若因非 ASCII 回退，必须显式告知，不得静默改道
+    requested_dir = output_dir
+    archive_dir_fallback = False
 
     # 阶段 2：读取轨迹并在内存中完成全量脱敏（此时尚未创建任何数据库文件）
     try:
@@ -505,7 +515,7 @@ def main():
 
     # Use ASCII-safe path for SQLite (avoid Chinese characters in path)
     # Python sqlite3 has issues with non-ASCII paths on Windows
-    # Use a fallback ASCII directory if the path contains non-ASCII
+    # 若因非 ASCII 回退到其它目录，必须显式告警 + 在结果中如实标注（绝不静默改道）
     try:
         output_dir.encode('ascii')
     except UnicodeEncodeError:
@@ -518,6 +528,9 @@ def main():
             print(json.dumps({'status': 'error', 'mode': 'archive', 'error': str(exc)}))
             sys.exit(3)
         permissions_enforced = bool(permissions_enforced and ascii_ok)
+        print(f"SECURITY_WARN: ARCHIVE_DIR_FALLBACK requested={requested_dir} "
+              f"effective={ascii_dir} reason=non-ascii-path", file=sys.stderr)
+        archive_dir_fallback = True
         output_dir = ascii_dir
 
     from datetime import datetime
@@ -621,6 +634,9 @@ def main():
         'chunk_id_range': [min_id, max_id],
         'msg_id_range': [min_msg, max_msg],
         'append_mode': append_mode,
+        'archive_dir': output_dir,
+        'requested_dir': requested_dir,
+        'archive_dir_fallback': archive_dir_fallback,
         'permissions_enforced': bool(permissions_enforced),
         'insecure_storage': bool(_INSECURE_WARNINGS),
         'warnings': list(_INSECURE_WARNINGS)

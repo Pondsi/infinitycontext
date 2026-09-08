@@ -51,6 +51,9 @@ The redaction path is fail-closed at every step:
 | rule application | a substitution error raises instead of `continue`-ing past the rule |
 | `session_key` | sanitised before any path or filename is built; non-conforming or sensitive values become `opaque-<sha256[:16]>` |
 | database write | the transcript is fully redacted in memory first, then written in one transaction; a failure rolls back and removes only a database created by that run |
+| rule path override | `INFINITY_CONTEXT_REDACT_RULES` can point at an alternate rule file; a broken file aborts instead of falling back to defaults |
+| in-place redaction | `--redact-file` refuses to run without `--allow-dir`, so the mutation is always scoped to a declared directory |
+| output directory | a non-ASCII path that would break SQLite falls back to an ASCII directory, but the fallback is reported (`archive_dir_fallback: true`, `requested_dir`, `archive_dir`) and warned about — never silent |
 
 The rule path can be overridden with `INFINITY_CONTEXT_REDACT_RULES`, which is also how
 the regression tests exercise a broken rule file without touching the installed copy.
