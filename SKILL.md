@@ -71,12 +71,12 @@ Copy `src/session_to_sqlite.py` to `~/.openclaw/scripts/`.
 ```powershell
 # Watchdog: every 10 minutes
 schtasks /Create /TN "OpenClaw-MainSessionMonitor" /TR `
-  "powershell.exe -NoProfile -WindowStyle Hidden -File `"scripts\main-session-monitor.ps1`" -AutoCompact" `
+  "powershell.exe -NoProfile -File `"scripts\main-session-monitor.ps1`" -AutoCompact" `
   /SC MINUTE /MO 10 /RL LIMITED /F
 
 # Backup cleanup: every 7 days
 schtasks /Create /TN "OpenClaw-CleanupOldBackups" /TR `
-  "powershell.exe -NoProfile -WindowStyle Hidden -File `"scripts\cleanup-old-backups.ps1`"" `
+  "powershell.exe -NoProfile -File `"scripts\cleanup-old-backups.ps1`"" `
   /SC DAILY /MO 7 /ST 03:00 /RL LIMITED /F
 ```
 

@@ -597,7 +597,7 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                         if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
                         
                         # T09 安全修复：使用临时 .py 文件 + 命令行参数，避免字符串插值注入
-                        $pyQueryFile = Join-Path $env:TEMP "oc_query_chunks.py"
+                        $pyQueryFile = Join-Path $env:TEMP "oc_qc_fa0d2d23.py"
                         @'
 import sqlite3, json, sys
 db_path = sys.argv[1]
@@ -650,7 +650,7 @@ print(json.dumps(result, ensure_ascii=False))
                             
                             # 用 Python 查询 SQLite 获取现有 chunks 构建 Navigation Map
                             # T09 安全修复：使用临时 .py 文件 + 命令行参数
-                            $pyNavFile = Join-Path $env:TEMP "oc_nav_map.py"
+                            $pyNavFile = Join-Path $env:TEMP "oc_nm_0c4a4c52.py"
                             @'
 import sqlite3, json, sys
 db_path = sys.argv[1]
