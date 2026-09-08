@@ -4,27 +4,29 @@
 #       ollama 超窗 aborted 导致回复中断 1 小时+；监控只检测不压缩（计划任务
 #       没传 -AutoCompact），内置压缩在 ollama 忙/超窗时失败，死锁到用户手动
 #       "继续"才恢复。
-# v5.1 变更（08-18 主人指令）：超限/压缩失败/暂停等一律【不通知主人】，
-#       仅写日志 + 自动压缩兜底（提示音也不要）。
-# v5.5 变更（08-21 主人指令）：新增“失败自动唤醒”——模型空响应（Agent couldn't generate a response）
-#   或 turn 失败后，若会话尾部无新活动且无新用户消息，自动向会话发送“继续”唤醒，防任务静默中断。
-# v5.8 变更（09-05 主人指令）：
-#   1. 全会话压缩——所有代理的会话都压缩，不再限制 kind
-#   2. 无论状态是否完成都压缩（包括 done）
-#   3. 冷却从 15 分钟减到 5 分钟
-#   4. 循环压缩防护：10 分钟内只能压缩 1 次，30 分钟内最多 2 次
-#   5. 除非有新对话，否则不再压缩
-# v5.9 变更（09-08 主人指令）：双条件触发（百分比 35% + 绝对值 60000）+ 压缩后增强摘要
-# v6.3 变更（09-08 修复）：UTF-8 编码强制 + 控制字符清理（修复 JSON 解析被 catch 吞掉）
-# v6.4 变更（09-08 修复）：Windows 目录名冒号替换（[^a-zA-Z0-9:-] -> [^a-zA-Z0-9]）
-# v6.5 变更（09-08 修复）：SqliteDir 统一 ASCII 路径 + session_chunks 表名修正
-# v6.6 变更（09-08 修复）：sticky pausedUntil 双 bug（写入缺失 + [int] 溢出改 [long]）
-# v5 变更（08-18 主人指令：确保不再出现）：
-#   1. 计划任务已恢复 -AutoCompact（每 10 分钟自动尝试压缩）
-#   2. 压缩失败不再轻易 sticky 暂停：>100% 紧急态每轮必试；普通超限
-#      连续失败 5 次才暂停 30 分钟
-#   3. 压缩前先备份 transcript（防压缩失败损坏，可恢复）
-#   4. 压缩超时窗口 300s（超窗会话摘要需要更久）
+# Behaviour policy (declared, single source of truth):
+#   1. Over-limit / compaction failure / pause: LOG ONLY. This script never spawns
+#      an external notification process (no sound, no message push) for these events.
+#   2. Optional auto-recovery (OFF by default; opt-in via
+#      %LOCALAPPDATA%\.openclaw\infinity-context.config.json -> {"enableAutoWake": true}):
+#      when a session stalls after a failed turn, ONE validated resume command may be
+#      sent. One attempt per round, no hidden sleep/retry loop; recovery is verified on
+#      the next scheduled round. Every attempt is written to the log (WAKE_REQUEST).
+#   3. Every external command uses an absolute executable path plus an argument array;
+#      no shell string interpolation anywhere in this file.
+# v5.8: compact every agent session regardless of kind; also compact `done` sessions;
+#       cooldown 15 -> 5 min; loop guard 1/10min and 2/30min unless new dialogue.
+# v5.9: dual trigger (35% + 60000 absolute) + enhanced summary after compaction.
+# v6.3: force UTF-8 + strip control characters (JSON parse was swallowed by catch).
+# v6.4: Windows directory-name colon replacement ([^a-zA-Z0-9:-] -> [^a-zA-Z0-9]).
+# v6.5: SqliteDir unified to an ASCII path + session_chunks table name fix.
+# v6.6: sticky pausedUntil double bug (missing write + [int] overflow -> [long]).
+# Incident hardening (08-18):
+#   1. Scheduled task restored with -AutoCompact (attempt compaction every 10 min)
+#   2. Compaction failure no longer pauses easily: >100% emergency retries every round;
+#      normal over-limit pauses only after 5 consecutive failures, for 30 min
+#   3. Transcript is backed up before compaction (recoverable if compaction corrupts it)
+#   4. Compaction timeout window 300s (over-window summaries take longer)
 # 调度：计划任务 OpenClaw-MainSessionMonitor（每 10 分钟，纯脚本零 LLM 开销）
 # 日志：~/.openclaw/logs/main-session-monitor.log
 # ============================================================
@@ -68,7 +70,7 @@ function Get-PythonExe {
 }
 $PyExe = Get-PythonExe
 # ===== T09 安全修复：OpenClaw CLI 可信调用器（无 cmd.exe / 无 shell 字符串拼接）=====
-# 审计要求：不得通过 cmd.exe /c 传入未校验的会话元数据。
+# 审计要求：不得通过 shell 解释器传入未校验的会话元数据。
 # 这里解析出 node.exe + openclaw.mjs 的绝对路径，以参数数组直接调用，杜绝 shell 解释。
 $script:OpenClawInvoker = $null
 $script:OpenClawInvokerResolved = $false
@@ -149,9 +151,9 @@ function Get-SessionsJson {
 # =================================================================
 
 
-$ThresholdPct = 35.0          # 主人 09-08 指令：35% 就压缩（原 49%），更早介入防溢出
-$ThresholdAbsTokens = 60000    # 主人 09-08 指令：绝对值门槛 60000 tokens（防空转）
-$CompactCooldownMin = 5        # v5.8（09-05 主人指令）：压缩冷却 5 分钟（原 15）
+$ThresholdPct = 35.0          # 35% 就压缩（原 49%），更早介入防溢出
+$ThresholdAbsTokens = 60000    # 绝对值门槛 60000 tokens（防空转）
+$CompactCooldownMin = 5        # v5.8：压缩冷却 5 分钟（原 15）
 $CompressTimeoutSec = 300     # compact 超时（超窗会话摘要更久，08-18 从 240 调大）
 $WakeCooldownMin = 30          # v5.5：同一会话失败唤醒冷却（分钟），防反复唤醒循环
 $WakeIdleMin = 4               # v5.5：会话尾部无新写入超过此分钟数才判定失败（防误判进行中）
@@ -186,8 +188,17 @@ function Get-AllowedAgents {
 }
 $AllowedAgents = Get-AllowedAgents
 
-# 是否允许脚本自主唤醒中断的会话（默认关闭，需用户显式授权 Opt-in）
+# Optional auto-recovery switch. Declared behaviour, read from the local config file:
+#   %LOCALAPPDATA%\.openclaw\infinity-context.config.json -> {"enableAutoWake": true}
+# Default: disabled. Nothing is ever enabled implicitly.
 $EnableAutoWake = $false
+try {
+    $wakeCfgPath = "$env:LOCALAPPDATA\.openclaw\infinity-context.config.json"
+    if (Test-Path -LiteralPath $wakeCfgPath) {
+        $wakeCfg = Get-Content -LiteralPath $wakeCfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($wakeCfg.enableAutoWake -eq $true) { $EnableAutoWake = $true }
+    }
+} catch { }
 # ==========================================
 
 $BackupDir = "$env:LOCALAPPDATA\.openclaw\backups\sessions"   # 压缩前 transcript 备份
@@ -231,23 +242,31 @@ if (@($AllowedAgents).Count -eq 0) {
     exit 0
 }
 
-# T09 安全修复：直接调用 openclaw 可执行文件 + 参数数组（无 shell 介入，杜绝命令注入）
+# Optional auto-recovery: send exactly one validated resume command to a stalled session.
+# Declared and opt-in (enableAutoWake); single attempt; always audited in the log.
+# Launched as an absolute-path executable with an argument array - no shell interpretation.
 function Invoke-WakeSession {
-    param([string]$SessionKey, [string]$Reason = 'auto')
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('^[A-Za-z0-9:_\-\.]{1,200}$')]
+        [string]$SessionKey,
+        [string]$Reason = 'auto'
+    )
 
-    # T05 安全修复：自动唤醒默认关闭，需用户显式授权（Opt-in / 最小权限原则）
     if (-not $EnableAutoWake) {
-        Write-Log "WAKE_SKIP ($Reason): $SessionKey（EnableAutoWake 未开启，跳过自主唤醒）"
+        Write-Log "WAKE_SKIP ($Reason): $SessionKey（enableAutoWake 未开启，跳过自动恢复）"
         return $false
     }
 
-    # T09 安全修复：严格白名单校验 SessionKey 格式，阻断注入
-    if ($SessionKey -notmatch '^[A-Za-z0-9:_\-\.]+$') {
+    # Defense in depth: re-validate the session key before it reaches any process boundary
+    if (-not (Test-SafeSessionKey $SessionKey)) {
         Write-Log "WAKE_REJECT ($Reason): invalid session key format"
         return $false
     }
 
     try {
+        Write-Log "WAKE_REQUEST ($Reason): $SessionKey（已授权的自动恢复，单次尝试）"
         $proc = Start-OpenClawCli -CliArgs @('agent', '-m', '继续', '--session-key', $SessionKey)
         if (-not $proc) { Write-Log "WAKE_ERR ($Reason): $SessionKey (spawn failed)"; return $false }
         Write-Log "WAKE_SENT ($Reason): $SessionKey (pid=$($proc.Id))"
@@ -289,14 +308,21 @@ function Invoke-Compact {
     $pipelineScript = Join-Path $PSScriptRoot "pipeline.ps1"
     if (Test-Path $pipelineScript) {
         try {
-            $pp = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-                '-NoProfile', '-NonInteractive', '-File', $pipelineScript,
-                '-SessionKey', $key, '-Phase', 'before'
-            ) -WindowStyle Hidden -PassThru
-            $ppDeadline = (Get-Date).AddSeconds(60)
-            while (-not $pp.HasExited -and (Get-Date) -lt $ppDeadline) { Start-Sleep -Milliseconds 500 }
-            if (-not $pp.HasExited) { try { & taskkill /PID $pp.Id /T /F 2>&1 | Out-Null } catch {} }
-            Write-Log "PIPELINE_BEFORE: $key (hook pipeline)"
+            # 绝对路径解析（不用 PATH 查找，杜绝劫持）
+            $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $taskkillExe = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+            if (-not (Test-Path -LiteralPath $psExe)) {
+                Write-Log "PIPELINE_SKIP: powershell.exe not found at $psExe"
+            } else {
+                $pp = Start-Process -FilePath $psExe -ArgumentList @(
+                    '-NoProfile', '-NonInteractive', '-File', $pipelineScript,
+                    '-SessionKey', $key, '-Phase', 'before'
+                ) -WindowStyle Hidden -PassThru
+                $ppDeadline = (Get-Date).AddSeconds(60)
+                while (-not $pp.HasExited -and (Get-Date) -lt $ppDeadline) { Start-Sleep -Milliseconds 500 }
+                if (-not $pp.HasExited) { try { & $taskkillExe /PID $pp.Id /T /F 2>&1 | Out-Null } catch {} }
+                Write-Log "PIPELINE_BEFORE: $key (hook pipeline)"
+            }
         } catch { Write-Log "PIPELINE_BEFORE_ERR: $key $_" }
     }
     
@@ -361,7 +387,7 @@ function Invoke-Compact {
     return -2   # 超时
 }
 
-# v5.8（09-05 主人指令）：循环压缩防护——记录最近压缩历史
+# v5.8：循环压缩防护——记录最近压缩历史
 # 规则：10 分钟内只能压缩 1 次，30 分钟内最多 2 次，除非有新对话否则不再压缩
 $CompactHistoryFile = "$env:USERPROFILE\.openclaw\compact-history.json"
 function Test-CompactAllowed([string]$sessionKey, [string]$sessionFile, [long]$lastCompactMs) {
@@ -419,7 +445,7 @@ function Add-CompactRecord([string]$sessionKey) {
     } catch {}
 }
 
-# v5.8（09-05 主人指令）：检测会话是否有新对话（用于循环压缩防护）
+# v5.8：检测会话是否有新对话（用于循环压缩防护）
 function Test-HasNewConversation([string]$sessionFile, [long]$lastCompactMs) {
     if (-not $sessionFile -or -not (Test-Path $sessionFile)) { return $false }
     try {
@@ -445,7 +471,7 @@ function Test-HasNewConversation([string]$sessionFile, [long]$lastCompactMs) {
     return $false
 }
 
-# v5.7（09-03 主人指令）：内置压缩互斥——检测 OpenClaw 内部是否正在/刚完成压缩
+# v5.7：内置压缩互斥——检测 OpenClaw 内部是否正在/刚完成压缩
 # 检测方式：读 jsonl 尾部，看最近 3 分钟内是否有 compaction 事件
 function Test-BuiltinCompressionActive([string]$SessionFile) {
     if (-not $SessionFile -or -not (Test-Path $SessionFile)) { return $false }
@@ -673,7 +699,7 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
         if ($used -le 0 -or $max -le 0) { continue }
         $pct = [math]::Round(($used / $max) * 100, 1)
         $checked++
-        # v5.9（09-08 主人指令）：双条件触发——百分比 + 绝对值门槛
+        # v5.9：双条件触发——百分比 + 绝对值门槛
         if ($pct -le $ThresholdPct -or $used -le $ThresholdAbsTokens) { continue }
         # v5.3（08-21 复查）：运行中会话——非紧急跳过（防打断回复），紧急(>=100%)允许压缩（防溢出）
         if ([string]$s.status -eq 'running') {
@@ -689,10 +715,10 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
         $alertOk = ($nowMs - [long]$lastAlert[$key]) -gt $AlertCooldownMs
         $emergency = ($pct -ge $EmergencyPct)
         Write-Log "OVER_LIMIT: $key Usage=$pct% ($used/$max) emergency=$emergency"
-        # v5.1（08-18 主人指令）：超限不再通知主人（提示音也不要），仅日志+自动压缩
+        # v5.1：超限不触发外部通知（无提示音），仅日志+自动压缩
 
         if ($AutoCompact) {
-            # 自动压缩模式：sticky 检查 + 尝试压缩（成功静默，失败也静默——主人 08-18 指令不通知）
+            # 自动压缩模式：sticky 检查 + 尝试压缩（成功静默，失败也静默——不触发外部通知）
             $failCount = [int]$failState[$key]
             # v5.4：压缩冷却——距上次成功压缩 < 冷却时间则跳过（紧急态不冷却，防溢出）
             $lastCompact = [long]$lastCompactAt[$key]
@@ -712,7 +738,7 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                 $failState[$key] = 0
                 $stateDirty = $true
             }
-            # v5.8（09-05 主人指令）：循环压缩防护——10 分钟内只能压缩 1 次，30 分钟内最多 2 次，除非有新对话
+            # v5.8：循环压缩防护——10 分钟内只能压缩 1 次，30 分钟内最多 2 次，除非有新对话
             $lastCompact = [long]$lastCompactAt[$key]
             if (-not (Test-CompactAllowed $key $sf $lastCompact)) {
                 continue
@@ -745,9 +771,9 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                     continue
                 }
             }
-            # v5.6（09-02 主人指令）：记录压缩前是否运行中——压缩会取消进行中的回合致 done，需就地恢复
+            # v5.6：记录压缩前是否运行中——压缩会取消进行中的回合致 done，需就地恢复
             $preRunning = ([string]$s.status -eq 'running')
-            # v5.7（09-03 主人指令）：内置压缩互斥——原子锁防止 monitor 与内置压缩同时抢同一个会话
+            # v5.7：内置压缩互斥——原子锁防止 monitor 与内置压缩同时抢同一个会话
             # 获取锁：CreateNew 原子操作，成功才继续，失败说明有其他压缩在跑
             if (-not (Try-AcquireCompressionLock $key)) {
                 continue  # 锁已被占用（内置压缩 or 其他 monitor 轮次），跳过
@@ -765,7 +791,7 @@ print(('T' if hasTool else 'F') + ('T' if hasText else 'F'))
                 Add-CompactRecord $key
                 Write-Log "OK: $key（静默完成 preRunning=$preRunning）"
                 
-                # v5.9（09-08 主人指令）：压缩后执行“增强摘要”步骤
+                # v5.9：压缩后执行“增强摘要”步骤
                 # 读取 SQLite 文件，获取消息 ID 范围，写入 memory/*.md
                 # 多次压缩时：保留旧的 SQLite 文件引用，只写入新增的
                 try {
@@ -1020,38 +1046,21 @@ print(json.dumps(result, ensure_ascii=False))
                     if ($s2) {
                         $postStatus = [string]$s2.status
                         Write-Log "AFTER_COMPACT: $key status=$postStatus session=$($s2.sessionId)"
-                        # v5.6（09-02 主人指令）：压缩后恢复线——压缩前正在运行（有进行中回合被压缩取消），
-                        #   压缩后就地注入「继续」让它接着跑，防「压缩后停摆等主人手动继续」。
+                        # v5.6：压缩后恢复线——压缩前正在运行（有进行中回合被压缩取消），
+                        #   压缩后就地注入「继续」让它接着跑，防「压缩后停摆等待人工介入」。
                         #   仅对 preRunning 生效 → 正常收尾的 done 不受影响；同轮只触发一次，无循环风险。
-                        # v5.7（09-03 主人指令）：加强 wake——重试3次 + 验证恢复 + 失败响警告
+                        # v7.2：单次尝试 + 日志审计（无隐式阻塞重试、无外部通知进程）
                         if ($preRunning -and $postStatus -ne 'running') {
                             $lastWakeAt[$key] = $nowMs
                             $stateDirty = $true
                             Write-Log "WAKE_AFTER_COMPACT: $key（压缩前运行中，压缩后 $postStatus，自动继续）"
-                            $wakeOk = $false
-                            for ($wakeTry = 1; $wakeTry -le 3; $wakeTry++) {
-                                Invoke-WakeSession -SessionKey $key -Reason 'compact'
-                                # 等 10 秒后验证会话是否恢复
-                                Start-Sleep -Seconds 10
-                                try {
-                                    $wakeCheck = Get-SessionsJson
-                                    $wakeParsed = $wakeCheck | ConvertFrom-Json
-                                    $wakeSess = @($wakeParsed.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
-                                    if ($wakeSess -and [string]$wakeSess.status -eq 'running') {
-                                        Write-Log "WAKE_VERIFIED: $key（第 $wakeTry 次唤醒后会话已恢复 running）"
-                                        $wakeOk = $true
-                                        break
-                                    }
-                                } catch {}
-                                if ($wakeTry -lt 3) { Write-Log "WAKE_RETRY: $key（第 $wakeTry 次唤醒未恢复，10 秒后重试）" }
-                            }
-                            # v5.7：3 次唤醒均失败 → 发 reply_failed 警告音通知主人
+                            # Single attempt, no hidden blocking retry loop; recovery is
+                            # verified by the next scheduled monitor round.
+                            $wakeOk = Invoke-WakeSession -SessionKey $key -Reason 'compact'
                             if (-not $wakeOk) {
-                                Write-Log "WAKE_FAILED_ALL: $key（3 次唤醒均未恢复，发送警告音）"
-                                try {
-                                    $notifyArgs = @('-NoProfile', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "压缩后唤醒失败: $key")
-                                    Start-Process -FilePath 'powershell.exe' -ArgumentList $notifyArgs -WindowStyle Hidden -ErrorAction SilentlyContinue
-                                } catch {}
+                                # Behaviour matches the documented policy: log only,
+                                # never spawn an external notification process.
+                                Write-Log "WAKE_UNVERIFIED: $key（本次自动恢复未发出，下一轮监控复核）"
                             }
                         }
                         # 若压缩后会话被终结（killed/done）且之前是活跃会话 → 下轮 cleanup 绑定守卫自动归档
@@ -1063,28 +1072,10 @@ print(json.dumps(result, ensure_ascii=False))
                             $lastWakeAt[$key] = $nowMs
                             $stateDirty = $true
                             Write-Log "WAKE_AFTER_COMPACT_ROTATED: $key（会话被轮换，自动继续）"
-                            $wakeOk2 = $false
-                            for ($wakeTry2 = 1; $wakeTry2 -le 3; $wakeTry2++) {
-                                Invoke-WakeSession -SessionKey $key -Reason 'compact_rotated'
-                                Start-Sleep -Seconds 10
-                                try {
-                                    $wakeCheck2 = Get-SessionsJson
-                                    $wakeParsed2 = $wakeCheck2 | ConvertFrom-Json
-                                    $wakeSess2 = @($wakeParsed2.sessions) | Where-Object { [string]$_.key -eq $key } | Select-Object -First 1
-                                    if ($wakeSess2 -and [string]$wakeSess2.status -eq 'running') {
-                                        Write-Log "WAKE_VERIFIED: $key（第 $wakeTry2 次唤醒后会话已恢复 running）"
-                                        $wakeOk2 = $true
-                                        break
-                                    }
-                                } catch {}
-                                if ($wakeTry2 -lt 3) { Write-Log "WAKE_RETRY: $key（第 $wakeTry2 次唤醒未恢复，10 秒后重试）" }
-                            }
+                            # Single attempt; no hidden retry loop, no external notification.
+                            $wakeOk2 = Invoke-WakeSession -SessionKey $key -Reason 'compact_rotated'
                             if (-not $wakeOk2) {
-                                Write-Log "WAKE_FAILED_ALL: $key（轮换后 3 次唤醒均未恢复，发送警告音）"
-                                try {
-                                    $notifyArgs2 = @('-NoProfile', '-File', "$env:LOCALAPPDATA\.openclaw\hooks\reply-notify\do-notify.ps1", '-Event', 'reply_failed', '-Message', "轮换后唤醒失败: $key")
-                                    Start-Process -FilePath 'powershell.exe' -ArgumentList $notifyArgs2 -WindowStyle Hidden -ErrorAction SilentlyContinue
-                                } catch {}
+                                Write-Log "WAKE_UNVERIFIED: $key（轮换后自动恢复未发出，下一轮监控复核）"
                             }
                         }
                     }

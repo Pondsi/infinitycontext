@@ -125,16 +125,49 @@ function Remove-ExpiredBackups {
     } catch { Write-Log "RETENTION_ERR: $_" }
 }
 
+# 定位脱敏引擎：脚本同目录优先，其次用户 scripts 目录（hook 目录可能只有 hook 文件）
+function Resolve-RedactorScript {
+    $cands = @(
+        (Join-Path $ScriptDir 'session_to_sqlite.py'),
+        (Join-Path $env:USERPROFILE '.openclaw\scripts\session_to_sqlite.py')
+    )
+    foreach ($c in $cands) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
+    return $null
+}
+
 # 对轨迹文件原地脱敏（复用 Python 脱敏引擎，避免规则重复维护）
+# Fail-Closed：脱敏不可用/失败时【销毁产物】并返回 $false，绝不保留未脱敏明文。
 function Redact-TrajectoryFile([string]$EventsPath) {
-    if (-not $RedactTrajectoryBackup -or $AllowUnredactedBackup) { return }
-    if (-not $PyExe) { Write-Log 'REDACT_SKIP: python not found'; return }
-    $pyScript = Join-Path $ScriptDir 'session_to_sqlite.py'
-    if (-not (Test-Path -LiteralPath $pyScript)) { Write-Log 'REDACT_SKIP: redactor not found'; return }
+    # 显式 opt-in 的完整备份：不做脱敏，但必须由用户主动开启
+    if ($AllowUnredactedBackup) {
+        Write-Log 'REDACT_BYPASS: unredacted backup explicitly opted in'
+        return $true
+    }
+    if (-not $RedactTrajectoryBackup) {
+        Write-Log 'REDACT_DISABLED: redaction is mandatory - destroying artifact'
+        Remove-Item -LiteralPath $EventsPath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    $pyScript = Resolve-RedactorScript
+    if (-not $PyExe -or -not $pyScript) {
+        Write-Log 'REDACT_FAIL_CLOSED: redactor unavailable - destroying artifact'
+        Remove-Item -LiteralPath $EventsPath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
     try {
         $out = & $PyExe $pyScript '--redact-file' $EventsPath 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "REDACT_FAIL_CLOSED: exit=$LASTEXITCODE - destroying artifact"
+            Remove-Item -LiteralPath $EventsPath -Force -ErrorAction SilentlyContinue
+            return $false
+        }
         Write-Log "REDACT_TRAJECTORY: $(Split-Path $EventsPath -Leaf) -> $($out.Trim())"
-    } catch { Write-Log "REDACT_ERR: $_" }
+        return $true
+    } catch {
+        Write-Log "REDACT_FAIL_CLOSED: $_ - destroying artifact"
+        Remove-Item -LiteralPath $EventsPath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
 }
 # ================================================
 
@@ -177,8 +210,12 @@ function Export-Trajectory($key) {
                     # T09 安全修复：目录 ACL 收紧到 当前用户 + SYSTEM
                     Protect-BackupAcl $destDir
                     Protect-BackupAcl $BackupDir
-                    # T09 安全修复：落地前脱敏（数据最小化）
-                    Redact-TrajectoryFile $eventsPath
+                    # T09 安全修复：脱敏为强制且 Fail-Closed——失败即销毁产物，绝不保留明文
+                    if (-not (Redact-TrajectoryFile $eventsPath)) {
+                        try { if (Test-Path -LiteralPath $destDir) { Remove-Item -LiteralPath $destDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
+                        Write-Log "HOOK_BEFORE: BACKUP_ABORTED: redaction failed, no backup retained ($key)"
+                        return $null
+                    }
                     Write-Log "HOOK_BEFORE: BACKUP MOVED: $key -> $destDir (events=$($exportData.transcriptEventCount))"
                     return @{ ExportDir = $destDir; EventsPath = $eventsPath; AgentId = $sess.agentId }
                 } catch {
@@ -201,21 +238,17 @@ function Export-Trajectory($key) {
 function Convert-ToSqlite($key, $eventsPath) {
     try {
         if (-not (Test-Path $SqliteDir)) { New-Item -ItemType Directory -Path $SqliteDir -Force | Out-Null }
-        $sqliteScript = "$ScriptDir\session-to-sqlite.ps1"
-        if (-not (Test-Path $sqliteScript)) {
-            Write-Log "HOOK_BEFORE: SQLITE_SKIPPED: session-to-sqlite.ps1 not found"
+        # 审计整改：直接调用 Python 引擎（不再 spawn powershell.exe 子进程，无 shell 解释）
+        $pyScript = Resolve-RedactorScript
+        if (-not $PyExe -or -not $pyScript) {
+            Write-Log "HOOK_BEFORE: SQLITE_SKIPPED: python or session_to_sqlite.py not found"
             return
         }
-        $sqliteOutFile = [System.IO.Path]::GetTempFileName()
-        $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-            '-NoProfile', '-File', $sqliteScript,
-            '-SessionKey', $key, '-SessionFile', $eventsPath,
-            '-OutputDir', $SqliteDir, '-AppendMode'
-        ) -WindowStyle Hidden -PassThru -RedirectStandardOutput $sqliteOutFile -RedirectStandardError "${sqliteOutFile}.err"
-        $proc.WaitForExit(60000) | Out-Null
-        $result = if (Test-Path $sqliteOutFile) { Get-Content $sqliteOutFile -Raw } else { $null }
-        Remove-Item $sqliteOutFile -Force -ErrorAction SilentlyContinue
-        Remove-Item "${sqliteOutFile}.err" -Force -ErrorAction SilentlyContinue
+        $result = & $PyExe $pyScript '--session-key' $key '--session-file' $eventsPath '--output-dir' $SqliteDir '--append' 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "HOOK_BEFORE: SQLITE_FAIL: $key exit=$LASTEXITCODE $($result.Trim())"
+            return
+        }
         if ($result) {
             $json = $result | ConvertFrom-Json
             if ($json.status -eq 'ok') {

@@ -1,6 +1,6 @@
 # InfinityContext
 
-**Open-Source Context Compression & Memory Optimization for AI Agents**
+**Open-Source Context Compression & Memory Optimization for AI Agents — DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama and any Agent Skills host**
 
 [English](#english) | [简体中文](#简体中文) | [繁體中文](#繁體中文) | [日本語](#日本語) | [한국어](#한국어) | [Español](#español) | [Português](#português) | [Français](#français) | [Deutsch](#deutsch) | [Русский](#русский)
 
@@ -8,9 +8,9 @@
 
 > ⚠️ **Privacy & Data Retention Notice / 隐私与数据留存声明**
 >
-> **EN** — This skill does more than compress context. It (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. `MAX_ARCHIVE_LENGTH` truncates oversized content and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and emails; high-entropy candidates are excluded from the index. Nothing is sent anywhere — no cloud sync, no telemetry, no outbound network. Backups are ACL-restricted to the current user + SYSTEM and pruned after 30 days. Auto-wake is off by default and the agent allowlist is deny-by-default. Run `scripts/cleanup-old-backups.ps1` for manual cleanup and SQLite `VACUUM`.
+> **EN** — This skill does more than compress context. It (a) exports the full session trajectory before every compaction, and (b) writes redacted conversation chunks into a **local-only SQLite archive** used for FTS5 retrieval. `MAX_ARCHIVE_LENGTH` truncates oversized content and a regex redactor masks API keys, tokens, passwords, JWTs, private keys, connection strings, phone numbers, and emails; high-entropy candidates are excluded from the index. **Fail-closed:** if redaction cannot run, the backup is destroyed, never kept in plaintext. Nothing is sent anywhere — no cloud sync, no telemetry, no outbound network. Backups are ACL-restricted to the current user + SYSTEM and pruned after 30 days. The optional **auto-recovery** is opt-in (`enableAutoWake`), sends exactly one validated resume command per monitor round, logs `WAKE_REQUEST` first, and never spawns a notification process; the agent allowlist is deny-by-default. The compaction hook verifies `pipeline.ps1` against `integrity.json` before executing. Run `scripts/cleanup-old-backups.ps1` for manual cleanup and SQLite `VACUUM`.
 >
-> **中文** — 本插件不只做上下文压缩：它会在每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入**纯本地 SQLite**（用于 FTS5 检索）。内置 `MAX_ARCHIVE_LENGTH` 截断与正则脱敏（API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱），高熵内容不进索引。不联网、不上传、无遥测；备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。自动唤醒默认关闭，Agent 白名单默认拒绝。可手动执行 `scripts/cleanup-old-backups.ps1` 清理并 VACUUM。
+> **中文** — 本插件不只做上下文压缩：它会在每次压缩前导出完整会话轨迹，并把脱敏后的对话片段写入**纯本地 SQLite**（用于 FTS5 检索）。内置 `MAX_ARCHIVE_LENGTH` 截断与正则脱敏（API Key / Token / 密码 / JWT / 私钥 / 连接串 / 手机号 / 邮箱），高熵内容不进索引。**Fail-Closed：脱敏无法执行时直接销毁备份，绝不保留明文。** 不联网、不上传、无遥测；备份目录 ACL 收紧为「当前用户 + SYSTEM」，默认保留 30 天后自动清理。可选的**自动恢复**需显式开启（`enableAutoWake`），每轮最多发送一次经过校验的「继续」指令，执行前先写 `WAKE_REQUEST` 日志，绝不拉起通知进程；Agent 白名单默认拒绝。压缩钩子执行前会校验 `pipeline.ps1` 的 `integrity.json` 摘要。可手动执行 `scripts/cleanup-old-backups.ps1` 清理并 VACUUM。
 
 ## Permissions / 权限声明
 
@@ -29,7 +29,7 @@ Declared capability scope (mirrors the Agent Skills `allowed-tools` field):
 
 ### What is this?
 
-InfinityContext is a **universal AI agent skill** that keeps your conversations forever — no context overflow, no forgotten goals, no lost details. Works with **any agent platform**: OpenClaw, Claude, ChatGPT, Gemini, Dify, Ollama, Cursor, or custom API.
+InfinityContext is a **universal AI agent skill** that keeps your conversations forever — no context overflow, no forgotten goals, no lost details. It is a standard `SKILL.md`, so it runs on **any Agent Skills host**, with first-class support for **DeepSeek Harness (dsh)** — drop it into `.agents/skills/` and the harness discovers it — plus Claude Code, OpenClaw, Cursor, Dify, Ollama, and custom agents.
 
 > **Core promise**: Whether you're using a 64K or 1M context model, switching between models mid-conversation, or running dozens of back-and-forth turns — InfinityContext ensures the agent always remembers **what it's doing**, **what it's done**, **how it did it**, and **every detail in between**. When you need specifics, it knows **when, where, and how** to retrieve them.
 
@@ -72,9 +72,9 @@ Deduplication: skip if backup exists within 5 minutes
 
 ### Requirements
 
-- OpenClaw installed and running
-- PowerShell 5.1+ (Windows)
-- Python 3.x (for SQLite conversion)
+- **Any host that loads standard `SKILL.md` / Agent Skills** — DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama, or a custom agent. **OpenClaw is optional.**
+- Python 3.9+ (redaction engine + SQLite/FTS5 archive — the portable core)
+- PowerShell 5.1+ (Windows only, for the optional watchdog and compaction hook)
 
 ### Sponsors
 
@@ -90,7 +90,7 @@ MIT License
 
 ### 这是什么？
 
-InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远完整——不溢出、不遗忘目标、不丢失任何细节。适用于**所有智能体平台**：OpenClaw、Claude、ChatGPT、Gemini、Dify、Ollama、Cursor，或任何自定义 API。
+InfinityContext 是一个**通用 AI 智能体技能**，让你的对话永远完整——不溢出、不遗忘目标、不丢失任何细节。它是标准 `SKILL.md`，可运行在**任何支持 Agent Skills 的宿主**上，并**原生支持 DeepSeek Harness（dsh）**——放进 `.agents/skills/` 即被自动发现；同样支持 Claude Code、OpenClaw、Cursor、Dify、Ollama 及自研 Agent。
 
 > **核心承诺**：无论你使用 64K 还是 1M 上下文的模型，无论对话中切换模型，无论进行了多少轮交互——InfinityContext 确保智能体始终记得**要做什么**、**做过什么**、**怎么做的**，以及**每一个中间细节**。当你需要具体信息时，它知道**什么时候、在哪里、怎么查**。
 
@@ -133,9 +133,9 @@ openclaw gateway restart
 
 ### 系统要求
 
-- OpenClaw 已安装并运行
-- PowerShell 5.1+（Windows）
-- Python 3.x（用于 SQLite 转换）
+- **任意支持标准 `SKILL.md` / Agent Skills 的宿主**——DeepSeek Harness（dsh）、Claude Code、OpenClaw、Cursor、Dify、Ollama 或自研 Agent。**OpenClaw 不是必需的。**
+- Python 3.9+（脱敏引擎 + SQLite/FTS5 归档，可独立运行的核心）
+- PowerShell 5.1+（仅 Windows，用于可选看门狗与压缩钩子）
 
 ### 许可证
 
