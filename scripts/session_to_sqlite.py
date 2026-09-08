@@ -270,12 +270,36 @@ def redact_file_in_place(path, allow_dir=None):
 
     if allow_dir:
         allowed = os.path.abspath(allow_dir)
+        # 1) 词法包含：先挡住 ../ 之类的明显越界
         try:
             inside = os.path.commonpath([abs_target, allowed]) == allowed
         except ValueError:
             inside = False
         if not inside:
             raise ValueError(f"refusing to redact outside {allowed}: {abs_target}")
+
+        # 2) 解析符号链接后的真实路径必须仍在允许目录内
+        #    （防止「允许目录内的符号链接祖先」把写入重定向到目录之外）
+        real_target = os.path.realpath(abs_target)
+        real_allowed = os.path.realpath(allowed)
+        try:
+            inside_real = os.path.commonpath([real_target, real_allowed]) == real_allowed
+        except ValueError:
+            inside_real = False
+        if not inside_real:
+            raise ValueError(
+                f"refusing to redact: resolved path {real_target} escapes {real_allowed}")
+
+        # 3) 允许目录内部不得发生符号链接跳转：词法相对路径与真实相对路径必须一致
+        try:
+            lex_rel = os.path.relpath(abs_target, allowed)
+            real_rel = os.path.relpath(real_target, real_allowed)
+        except ValueError as exc:
+            raise ValueError(f"refusing to redact: cannot resolve the path safely ({exc})") from exc
+        if lex_rel != real_rel:
+            raise ValueError(
+                "refusing to redact: a symbolic link inside the allowed directory "
+                "would redirect the write")
 
     with open(abs_target, 'r', encoding='utf-8-sig', errors='replace') as f:
         data = f.read()

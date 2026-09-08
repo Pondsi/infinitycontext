@@ -3,6 +3,24 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.6.1 — 2026-09-09
+
+Path-resolution fix. The ClawHub review of 1.6.0 accepted the previous concerns but
+found a precise remaining flaw:
+
+> one file-redaction helper has a real path-scoping weakness that can rewrite
+> user-writable files outside the declared directory through symlinked ancestors
+
+### Fixed
+- `redact_file_in_place()` now resolves every symbolic link before deciding scope.
+  Three checks must all pass: the lexical path must be inside `--allow-dir`; the
+  `realpath`-resolved target must be inside the resolved allowed directory; and the
+  lexical relative path must equal the resolved relative path, which rejects any
+  symlink traversal inside the allowed tree (a junction such as `allowed/jump/x` can
+  no longer redirect the write outside the tree).
+- The regression suite creates a real directory junction and proves that the outside
+  file is refused and left untouched.
+
 ## 1.6.0 — 2026-09-09
 
 Scope-and-transparency release. It addresses the two concerns the ClawHub reviewer
