@@ -1,7 +1,41 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
+
+## 1.8.8 — 2026-09-10
+
+Repository release — OpenClaw integration hardening. **The portable core is unchanged and the
+registry artifact stays at 1.8.7** until it is republished; these files live in `openclaw/`,
+outside the published package.
+
+### Fixed
+- **No console window can flash any more.** Every process the integration starts now goes
+  through `Start-HiddenProcess` (`.NET ProcessStartInfo.CreateNoWindow = $true`, the managed
+  form of `CREATE_NO_WINDOW`) instead of `Start-Process -WindowStyle Hidden`. A hidden window
+  style still allocates a console for console apps; `CreateNoWindow` creates the child with
+  no console at all. This covers the second PowerShell that runs `pipeline.ps1 -Phase before`
+  and both `node.exe` calls into the OpenClaw CLI.
+- **Removed the `& $python -c "print(1)"` execution probe** from the interpreter lookup in
+  `pipeline.ps1`, `main-session-monitor.ps1` and `session-to-sqlite.ps1`. A candidate is now
+  accepted on existence alone, so no untrusted program is executed merely to test it (T07),
+  and no extra `python.exe` is spawned on every run.
+- **`session-to-sqlite.ps1` no longer searches `PATH`** for `python3` / `python` / `py`. A
+  PATH hit can be the zero-byte Microsoft Store app-alias stub, which opens a window when
+  run. Resolution now uses explicit trusted roots or `INFINITY_CONTEXT_PYTHON`.
+- **`openclaw/README.md` version guard corrected** (it still pinned an older tag).
+- **Interpreter lookup actually finds Python again.** `Get-ChildItem -Path 'C:\Python3*'
+  -Filter 'python.exe'` returns nothing — the wildcard matches the *directory*, so the file
+  filter has nothing to match. `session-to-sqlite.ps1` and `cleanup-old-backups.ps1` joined
+  the file name into the pattern instead. This also fixes a **pre-existing** bug: the
+  cleanup script's `VACUUM` step had been silently skipped ("no Python interpreter found")
+  since 1.8.1.
+
+### Added
+- **`openclaw/README.md` documents no-window scheduling** — why a task pointed straight at
+  `powershell.exe -WindowStyle Hidden` flashes, and the `wscript.exe` + `RunHidden.vbs`
+  registration that does not, with copy-paste `schtasks` commands for the watchdog and the
+  cleanup task.
 
 ## 1.8.7 — 2026-09-09
 

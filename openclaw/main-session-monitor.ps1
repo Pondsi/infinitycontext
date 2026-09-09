@@ -52,21 +52,71 @@ function Get-PythonExe {
             if ($ip) { [void]$cands.Add((Join-Path $ip 'python.exe')) }
         }
     }
+    # 1.8.8: existence check only. No "print(1)" execution probe - never execute an
+    # untrusted candidate just to test it (T07). Also avoids spawning an extra
+    # python.exe process (and any console it might need) on every run.
     foreach ($c in $cands) {
-        if ($c -and (Test-Path $c)) {
-            $ok = $false
-            try {
-                $prevEap = $ErrorActionPreference
-                $ErrorActionPreference = 'Continue'
-                $t = & $c -c "print(1)" 2>$null
-                if ("$t" -match '1') { $ok = $true }
-            } catch {} finally { $ErrorActionPreference = $prevEap }
-            if ($ok) { return $c }
+        if ($c -and (Test-Path -LiteralPath $c -PathType Leaf) -and
+            ([System.IO.Path]::GetFileName($c) -ieq 'python.exe')) {
+            return $c
         }
     }
     return $null
 }
 $PyExe = Get-PythonExe
+
+# ===== Hidden process launcher (1.8.8) =====================================
+# Start-Process -WindowStyle Hidden still allocates a console for console apps.
+# .NET ProcessStartInfo.CreateNoWindow = $true maps to CREATE_NO_WINDOW, so the
+# child is created with no console window at all - nothing can flash.
+function ConvertTo-ArgToken {
+    param([string]$Value)
+    if ($null -eq $Value) { return '""' }
+    if ($Value -match '[\s"]') {
+        $e = $Value -replace '(\\*)"', '$1$1\"'
+        $e = $e -replace '(\\+)$', '$1$1'
+        return '"' + $e + '"'
+    }
+    return $Value
+}
+
+function Start-HiddenProcess {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$StdOutFile,
+        [string]$StdErrFile
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.Arguments = (@($ArgumentList) | ForEach-Object { ConvertTo-ArgToken $_ }) -join ' '
+    if ($StdOutFile) { $psi.RedirectStandardOutput = $true }
+    if ($StdErrFile) { $psi.RedirectStandardError = $true }
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    if ($StdOutFile) { $script:__spOut = $proc.StandardOutput.ReadToEndAsync() }
+    if ($StdErrFile) { $script:__spErr = $proc.StandardError.ReadToEndAsync() }
+    return $proc
+}
+
+function Complete-HiddenProcess {
+    param([System.Diagnostics.Process]$Process, [string]$StdOutFile, [string]$StdErrFile)
+    try {
+        if ($StdOutFile -and $script:__spOut) {
+            [System.IO.File]::WriteAllText($StdOutFile, $script:__spOut.GetAwaiter().GetResult(),
+                (New-Object System.Text.UTF8Encoding($false)))
+        }
+        if ($StdErrFile -and $script:__spErr) {
+            [System.IO.File]::WriteAllText($StdErrFile, $script:__spErr.GetAwaiter().GetResult(),
+                (New-Object System.Text.UTF8Encoding($false)))
+        }
+    } catch {}
+}
+# ==========================================================================
 
 # ===== T09 安全修复：OpenClaw CLI 可信调用器（无 cmd.exe / 无 shell 字符串拼接）=====
 # 审计要求：不得通过 shell 解释器传入未校验的会话元数据。
@@ -121,11 +171,12 @@ function Invoke-OpenClawCli {
     if (-not $inv) { Write-Log 'OPENCLAW_NOT_FOUND'; return '' }
     $outFile = [System.IO.Path]::GetTempFileName()
     try {
-        $p = Start-Process -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs) -WindowStyle Hidden -PassThru `
-             -RedirectStandardOutput $outFile -RedirectStandardError "$outFile.err" -ErrorAction Stop
+        $p = Start-HiddenProcess -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs) `
+             -StdOutFile $outFile -StdErrFile "$outFile.err"
         if (-not $p.WaitForExit($TimeoutSec * 1000)) {
             if ($script:ExeTaskkill) { & $script:ExeTaskkill /PID $p.Id /T /F 2>&1 | Out-Null }
         }
+        Complete-HiddenProcess -Process $p -StdOutFile $outFile -StdErrFile "$outFile.err"
         return (Get-Content -LiteralPath $outFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
     } catch { Write-Log "OPENCLAW_CLI_ERR: $_"; return '' }
     finally {
@@ -148,7 +199,7 @@ function Start-OpenClawCli {
     $inv = Resolve-OpenClawInvoker
     if (-not $inv) { Write-Log 'OPENCLAW_NOT_FOUND'; return $null }
     try {
-        return Start-Process -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs) -WindowStyle Hidden -PassThru -ErrorAction Stop
+        return Start-HiddenProcess -FilePath $inv.File -ArgumentList (@($inv.Args) + $CliArgs)
     } catch {
         Write-Log "OPENCLAW_SPAWN_ERR: $_"
         return $null
@@ -355,10 +406,10 @@ function Invoke-Compact {
             if (-not (Test-Path -LiteralPath $psExe)) {
                 Write-Log "PIPELINE_SKIP: powershell.exe not found at $psExe"
             } else {
-                $pp = Start-Process -FilePath $psExe -ArgumentList @(
+                $pp = Start-HiddenProcess -FilePath $psExe -ArgumentList @(
                     '-NoProfile', '-NonInteractive', '-File', $pipelineScript,
                     '-SessionKey', $key, '-Phase', 'before'
-                ) -WindowStyle Hidden -PassThru
+                )
                 $ppDeadline = (Get-Date).AddSeconds(60)
                 while (-not $pp.HasExited -and (Get-Date) -lt $ppDeadline) { Start-Sleep -Milliseconds 500 }
                 if (-not $pp.HasExited) { try { & $taskkillExe /PID $pp.Id /T /F 2>&1 | Out-Null } catch {} }

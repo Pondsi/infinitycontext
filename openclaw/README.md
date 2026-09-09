@@ -23,10 +23,10 @@ Use a pinned revision and verify every digest before copying. Never copy with a 
 # 1. pinned checkout (audited release tag, never the mutable default branch)
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.7
+git checkout --detach v1.8.8
 
 # 2. the pinned tag must equal the version in SKILL.md frontmatter
-if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.8\.6"' -Quiet)) {
+if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.8\.8"' -Quiet)) {
     throw "tag/version mismatch - stop"
 }
 
@@ -62,6 +62,50 @@ Copy-Item scripts\secure_fs.py              $sc
 # 5. restart the gateway
 openclaw gateway restart
 ```
+
+## No-window scheduling (Windows)
+
+The hook itself never flashes: OpenClaw starts `handler.js`, which spawns PowerShell with
+`windowsHide: true` and `stdio: 'ignore'`, and every child process it starts now uses
+`Start-HiddenProcess` (`.NET ProcessStartInfo.CreateNoWindow = $true` — the managed form of
+`CREATE_NO_WINDOW`). A child created that way has **no console at all**.
+
+If you also register the watchdog or the cleanup as a scheduled task, do **not** point the
+task straight at `powershell.exe`:
+
+```text
+# BAD - Task Scheduler creates a visible console, PowerShell hides it afterwards -> one black flash
+powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File ...\main-session-monitor.ps1
+```
+
+`-WindowStyle Hidden` is parsed *by PowerShell*, so the window already exists by then. Wrap
+the command in a `.vbs` launcher instead, so the task host never creates a console:
+
+```vbs
+' RunHidden.vbs - run a command with no console window
+Set sh = CreateObject("WScript.Shell")
+cmd = ""
+For i = 0 To WScript.Arguments.Count - 1
+    a = WScript.Arguments(i)
+    If InStr(a, " ") > 0 Then a =  & a & 
+    cmd = cmd & " " & a
+Next
+sh.Run Trim(cmd), 0, False
+```
+
+```powershell
+# GOOD - wscript owns the process; no console is ever created
+$vbs = "$env:USERPROFILE\.openclaw\workspace\scripts\RunHidden.vbs"
+$sc  = "$env:USERPROFILE\.openclaw\scripts"
+$tr  = "wscript.exe //nologo `"$vbs`" powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$sc\main-session-monitor.ps1`" -AutoCompact"
+schtasks /Create /TN "OpenClaw-MainSessionMonitor" /TR $tr /SC MINUTE /MO 10 /F
+
+$tr2 = "wscript.exe //nologo `"$vbs`" powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$sc\cleanup-old-backups.ps1`""
+schtasks /Create /TN "OpenClaw-CleanupOldBackups" /TR $tr2 /SC DAILY /ST 04:10 /F
+```
+
+Verify with `Get-ScheduledTask -TaskName OpenClaw-MainSessionMonitor | Select -Expand Actions`
+— `Execute` must be `wscript.exe`, never `powershell.exe`.
 
 ## Security properties
 

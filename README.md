@@ -41,7 +41,7 @@
 | Files | 15 | 31 |
 | OpenClaw hook, watchdog, Windows helpers (`openclaw/`) | — | ✅ |
 | Best for | dsh, Claude Code, Cursor, Dify, Ollama, any `SKILL.md` host | OpenClaw on Windows with automation |
-| Version | same tag | same tag |
+| Version | the audited release | the newest release — integration fixes land here first |
 
 > The registry package is **deliberately slimmed to the auditable core** — that is exactly what the security scan reviews, and nothing outside it is executed. The GitHub repository is the **complete project**: the identical core **plus** the optional host integration, so no capability is missing when you need it.
 >
@@ -165,8 +165,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.7
-grep -q '^version: "1.8.7"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.8
+grep -q '^version: "1.8.8"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 ```
 
@@ -284,8 +284,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.7
-grep -q '^version: "1.8.7"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.8
+grep -q '^version: "1.8.8"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 ```
 

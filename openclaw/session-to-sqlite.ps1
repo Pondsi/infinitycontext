@@ -15,31 +15,31 @@ $ErrorActionPreference = 'Stop'
 
 # ===== 可移植性修复：通用 Python 探测器（扫描标准安装位置，不硬编码用户路径）=====
 function Get-PythonExe {
-    $cands = New-Object System.Collections.ArrayList
-    foreach ($n in @('python3','python','py')) {
-        $cmd = Get-Command $n -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and $cmd.Source -notmatch 'WindowsApps') { [void]$cands.Add($cmd.Source) }
-    }
-    foreach ($pat in @("$env:ProgramFiles\Python3*\python.exe", "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", 'C:\Python3*\python.exe')) {
-        Get-ChildItem $pat -ErrorAction SilentlyContinue | ForEach-Object { [void]$cands.Add($_.FullName) }
-    }
-    foreach ($root in @('HKLM:\SOFTWARE\Python\PythonCore','HKCU:\SOFTWARE\Python\PythonCore')) {
-        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
-            $ip = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction SilentlyContinue).'(default)'
-            if ($ip) { [void]$cands.Add((Join-Path $ip 'python.exe')) }
+    # 1.8.8: no PATH lookup and no execution probe (T07). A PATH hit can be the
+    # zero-byte Microsoft Store app-alias stub, which pops a window when run.
+    # Candidates come only from explicit trusted roots or INFINITY_CONTEXT_PYTHON.
+    if ($env:INFINITY_CONTEXT_PYTHON) {
+        $ov = $env:INFINITY_CONTEXT_PYTHON
+        if ([System.IO.Path]::IsPathRooted($ov) -and
+            (Test-Path -LiteralPath $ov -PathType Leaf) -and
+            ([System.IO.Path]::GetFileName($ov) -ieq 'python.exe')) {
+            return $ov
         }
+        Write-Warning "INFINITY_CONTEXT_PYTHON is not an absolute python.exe path, ignored: $ov"
     }
-    foreach ($c in $cands) {
-        if ($c -and (Test-Path $c)) {
-            $ok = $false
-            try {
-                $prevEap = $ErrorActionPreference
-                $ErrorActionPreference = 'Continue'
-                $t = & $c -c "print(1)" 2>$null
-                if ("$t" -match '1') { $ok = $true }
-            } catch {} finally { $ErrorActionPreference = $prevEap }
-            if ($ok) { return $c }
-        }
+    $roots = @(
+        "$env:ProgramFiles\Python3*",
+        "${env:ProgramFiles(x86)}\Python3*",
+        "$env:LOCALAPPDATA\Programs\Python\Python3*",
+        'C:\Python3*'
+    )
+    # 1.8.8: match the FILE, not the directory. -Path 'C:\Python3*' -Filter 'python.exe'
+    # returns nothing because the wildcard matches the directory itself; join the
+    # file name into the pattern instead.
+    foreach ($root in $roots) {
+        $hit = Get-ChildItem -Path (Join-Path $root 'python.exe') -File -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($hit -and (Test-Path -LiteralPath $hit.FullName -PathType Leaf)) { return $hit.FullName }
     }
     return $null
 }

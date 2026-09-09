@@ -103,8 +103,11 @@ function Get-PythonExe {
         "$env:LOCALAPPDATA\Programs\Python\Python3*",
         'C:\Python3*'
     )
-    foreach ($pat in $roots) {
-        $hit = Get-ChildItem -Path $pat -Filter 'python.exe' -File -ErrorAction SilentlyContinue |
+    # 1.8.8: match the FILE, not the directory. -Path 'C:\Python3*' -Filter 'python.exe'
+    # returns nothing because the wildcard matches the directory itself; join the
+    # file name into the pattern instead.
+    foreach ($root in $roots) {
+        $hit = Get-ChildItem -Path (Join-Path $root 'python.exe') -File -ErrorAction SilentlyContinue |
                Select-Object -First 1
         if ($hit -and (Test-Path -LiteralPath $hit.FullName -PathType Leaf)) { return $hit.FullName }
     }
