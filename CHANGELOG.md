@@ -3,6 +3,25 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.6 — 2026-09-09
+
+Documentation-only release: the page now says what the skill actually does for you, and the
+package boundary is explicit.
+
+### Changed
+- **Benefit-first hero in `SKILL.md`, `README.md` and `说明.md`** — what the agent stops
+  losing, what it gets back, and a before/after table for a context compaction — immediately
+  followed by the unchanged security disclosure.
+- **Fixed a broken heading fragment.** ` — portable context compression & memory archive`
+  had been split off from the title and rendered as a stray line at the top of the page.
+- **The package boundary is now an explicit table.** The registry artifact is the audited
+  portable core (15 files); the GitHub repository is the complete project (31 files)
+  including `openclaw/`.
+- **`openclaw/README.md` version guard corrected** — it was still pinned to an older tag.
+
+### Unchanged
+- No change to any script, to permissions, to retention behaviour or to the security posture.
+
 ## 1.8.5 — 2026-09-09
 
 Removes the last capability claims that did not match the published package.

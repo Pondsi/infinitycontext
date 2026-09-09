@@ -6,12 +6,37 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.8.5"
+  version: "1.8.6"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
 
 # InfinityContext
+
+**Your agent never forgets.** Compress the context window without losing a single detail — and know exactly when and how to bring any of it back.
+
+Long sessions eventually hit the context limit. Ordinary compression throws the details away: the agent forgets what you said, loses the goal, and repeats work.
+
+InfinityContext keeps the **complete record** in a local SQLite + FTS5 archive while the **context window stays small**. When something from hundreds of turns ago matters again, the agent searches the archive and returns the exact message — offline, on your machine.
+
+| What you get | What it means |
+|---|---|
+| 🧠 **Nothing is forgotten** | Every turn is archived and searchable down to the individual message — not just a summary. |
+| 🎯 **The goal never gets lost** | Goals, decisions and open tasks stay retrievable after the window is compressed, so the agent does not drift or redo work. |
+| 🔎 **Knows when and how to recall** | The skill teaches the retrieval pattern — which script, which query, which scope — instead of leaving the agent to guess. |
+| 🪶 **Small window, long session** | Keep the window lean enough for deep reasoning; the archive carries the volume. |
+| 🔒 **Local, private, bounded** | No network, no telemetry, no cloud. Owner-only permissions, 30-day default retention, one-flag off switch. |
+| ⚡ **Runs everywhere** | DeepSeek Harness (dsh), OpenClaw, Claude Code, Cursor, Dify, Ollama — Python 3.9+ standard library only. |
+
+**Before / after a context compaction**
+
+| | Without InfinityContext | With InfinityContext |
+|---|---|---|
+| After compaction | details gone, goal fuzzy, work repeated | window small, **details archived**, goal intact |
+| Recalling turn #12 from hours ago | impossible | one FTS5 query |
+| Where your conversation lives | only in the window | only on your machine |
+
+> **Scope, stated plainly.** Details stay retrievable inside the retention window — **30 days by default**, configurable `1..3650`, or unbounded only with an explicit flag. No network, no shell, no subprocesses.
 
 > ## ⚠️ Security & Privacy Disclosure (Intended Behavior)
 >
@@ -34,9 +59,6 @@ metadata:
 >
 > **Installing this skill means accepting these local persistence and file-mutation
 > capabilities.**
- — portable context compression & memory archive
-
-> Keep long sessions usable: compress context, archive redacted chunks locally inside a bounded retention window, retrieve exact details later.
 
 Works out of the box on **DeepSeek Harness (dsh)** and **OpenClaw**, and on any
 host that loads a standard `SKILL.md`.
@@ -59,8 +81,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.5
-grep -q '^version: "1.8.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.6
+grep -q '^version: "1.8.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 ```
@@ -221,7 +243,30 @@ MIT with a **mandatory attribution requirement** — using all or part of the so
 
 # 无限上下文压缩与记忆归档
 
-> 让任何模型持续对话：压缩上下文、把每个片段归档到本地、随时精确检索细节。
+**让智能体永不健忘。** 压缩上下文窗口，却一个细节都不丢——并且知道什么时候、用什么方法，把哪个细节找回来。
+
+长会话迟早会撞上上下文上限。普通压缩把细节直接扔掉：智能体忘了你说过什么、丢了目标、重复干过的活。
+
+InfinityContext 把**完整记录**放进本地 SQLite + FTS5 归档，而**上下文窗口保持精简**。几百轮之前的事再被提起时，智能体检索归档，取回那一句原话——离线、在本机。
+
+| 你得到什么 | 意味着什么 |
+|---|---|
+| 🧠 **细节不会被忘掉** | 每一轮对话都进归档，可检索到单条消息——不是只有摘要。 |
+| 🎯 **目标不会丢** | 目标、决策、未完成任务在窗口压缩后依然可检索，智能体不会跑偏或重做。 |
+| 🔎 **知道何时、如何回忆** | 技能教会智能体检索套路——用哪个脚本、什么查询、多大范围——而不是让它瞎猜。 |
+| 🪶 **小窗口，长会话** | 窗口保持精简，深度思考照样放得下；体量交给归档。 |
+| 🔒 **本地、私密、有边界** | 不联网、无遥测、不上云；仅所有者可读，默认保留 30 天，一个开关即可关闭。 |
+| ⚡ **到处都能跑** | dsh、OpenClaw、Claude Code、Cursor、Dify、Ollama——只用 Python 3.9+ 标准库。 |
+
+**上下文压缩前后对比**
+
+| | 没有 InfinityContext | 有 InfinityContext |
+|---|---|---|
+| 压缩之后 | 细节消失、目标模糊、重复劳动 | 窗口变小、**细节已归档**、目标完好 |
+| 回忆几小时前的第 12 轮 | 不可能 | 一次 FTS5 查询 |
+| 对话存在哪 | 只在窗口里 | 只在你本机 |
+
+> **范围说明（如实）**：细节在保留窗口内可检索——**默认 30 天**，可配 `1..3650`，无界需显式开关。不联网、无 shell、无子进程。
 
 **开箱即用**：DeepSeek Harness（dsh）与 OpenClaw；任何加载标准 `SKILL.md` 的宿主亦可。
 

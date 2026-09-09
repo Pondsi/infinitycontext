@@ -6,6 +6,49 @@
 
 ---
 
+## ⚡ Why InfinityContext / 为什么需要它
+
+**EN** — Long sessions hit the context limit. Ordinary compression throws the details away: the agent forgets what you said, loses the goal, and repeats work. **InfinityContext keeps the complete record in a local SQLite + FTS5 archive while the context window stays small** — so when something from hundreds of turns ago matters again, the agent finds it and returns the exact message. Offline, on your machine.
+
+**中文** — 长会话迟早撞上上下文上限。普通压缩把细节直接扔掉：智能体忘了你说过什么、丢了目标、重复干过的活。**InfinityContext 把完整记录放进本地 SQLite + FTS5 归档，而上下文窗口保持精简**——几百轮之前的事再被提起时，智能体能找到并取回那一句原话。离线、在本机。
+
+| What you get / 你得到什么 | Why it matters / 意味着什么 |
+|---|---|
+| 🧠 **Nothing is forgotten / 细节不会被忘掉** | Every turn is archived and searchable down to the single message — not just a summary. |
+| 🎯 **The goal never gets lost / 目标不会丢** | Goals, decisions and open tasks stay retrievable after compression, so the agent does not drift or redo work. |
+| 🔎 **Knows when and how to recall / 知道何时如何回忆** | The skill teaches the retrieval pattern — which script, which query, which scope — instead of leaving the agent to guess. |
+| 🪶 **Small window, long session / 小窗口，长会话** | Keep the window lean for deep reasoning; the archive carries the volume. |
+| 🔒 **Local, private, bounded / 本地、私密、有边界** | No network, no telemetry, no cloud. Owner-only permissions, 30-day default retention, one-flag off switch. |
+| ⚡ **Runs everywhere / 到处都能跑** | DeepSeek Harness (dsh), OpenClaw, Claude Code, Cursor, Dify, Ollama — Python 3.9+ standard library only. |
+
+**Before / after a compaction / 压缩前后对比**
+
+| | Without InfinityContext | With InfinityContext |
+|---|---|---|
+| After compaction | details gone, goal fuzzy, work repeated | window small, **details archived**, goal intact |
+| Recalling turn #12 from hours ago | impossible | one FTS5 query |
+| Where your conversation lives | only in the window | only on your machine |
+
+> **Scope, stated plainly / 范围说明**：details stay retrievable inside the retention window — **30 days by default**, `1..3650` configurable, unbounded only with an explicit flag.
+
+---
+
+## Which package should I install? / 该装哪个包？
+
+| | **ClawHub / registry artifact** | **GitHub repository** |
+|---|---|---|
+| What it is | the security-audited portable core | **the complete, unabridged project** |
+| Files | 15 | 31 |
+| OpenClaw hook, watchdog, Windows helpers (`openclaw/`) | — | ✅ |
+| Best for | dsh, Claude Code, Cursor, Dify, Ollama, any `SKILL.md` host | OpenClaw on Windows with automation |
+| Version | same tag | same tag |
+
+> The registry package is **deliberately slimmed to the auditable core** — that is exactly what the security scan reviews, and nothing outside it is executed. The GitHub repository is the **complete project**: the identical core **plus** the optional host integration, so no capability is missing when you need it.
+>
+> 注册表包**刻意精简为可审计核心**（安全扫描审查的就是它，它之外没有任何代码会被执行）；GitHub 仓库是**完整项目**：核心完全一致，**外加**可选的宿主集成，需要时功能一个不少。
+
+---
+
 > ⚠️ **Security & Privacy Disclosure — Intended Behavior / 安全与隐私披露（预期行为）**
 >
 > **EN** — InfinityContext is a **local persistent store and lifecycle manager** for agent
@@ -122,8 +165,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.5
-grep -q '^version: "1.8.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.6
+grep -q '^version: "1.8.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 ```
 
@@ -241,8 +284,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.5
-grep -q '^version: "1.8.5"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.6
+grep -q '^version: "1.8.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 ```
 
