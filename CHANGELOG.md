@@ -3,6 +3,16 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.7 — 2026-09-09
+
+One more pointer so nobody installs the slim package by accident.
+
+### Added
+- **`SKILL.md` now says where the complete project lives** (English and 简体中文): the
+  GitHub repository is the full, unabridged version — the identical core **plus** the
+  optional `openclaw/` host integration with its own README and checksums. The registry
+  package is deliberately slimmed to the auditable core.
+
 ## 1.8.6 — 2026-09-09
 
 Documentation-only release: the page now says what the skill actually does for you, and the

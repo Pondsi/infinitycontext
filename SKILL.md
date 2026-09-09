@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.8.6"
+  version: "1.8.7"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -81,8 +81,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.6
-grep -q '^version: "1.8.6"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.7
+grep -q '^version: "1.8.7"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 ```
@@ -191,6 +191,12 @@ no code fetched at install time — the audited artifact is exactly what runs.
 Any host-specific automation is deliberately **out of scope** for this package.
 Anything of that kind lives in the repository outside the published artifact and
 carries its own documentation, pinned revision and checksums.
+
+> **Want the complete project?** The GitHub repository
+> ([Pondsi/infinitycontext](https://github.com/Pondsi/infinitycontext)) is the **full,
+> unabridged** version — the identical core **plus** the optional host integration
+> (`openclaw/`, with its own README and checksums), so nothing is missing when you need
+> it. The registry package here is deliberately slimmed to the auditable core.
 
 ## Configuration
 
@@ -329,6 +335,11 @@ clawhub install infinitycontext --workdir ~/.openclaw --dir skills  # OpenClaw �
 
 宿主专有的自动化**不属于本包范围**，只存在于仓库中、位于发布产物之外，
 并自带文档、固定版本号与校验和。
+
+> **想要完整项目？** GitHub 仓库
+> （[Pondsi/infinitycontext](https://github.com/Pondsi/infinitycontext)）是**完整、不精简**的版本：
+> 核心完全一致，**外加**可选的宿主集成（`openclaw/`，自带 README 与校验和），需要时功能一个不少。
+> 你在这里看到的注册表包**刻意精简为可审计核心**。
 
 ## 其它语言
 
