@@ -1,4 +1,4 @@
-# InfinityContext
+﻿# InfinityContext
 
 **Open-Source Context Compression & Memory Optimization for AI Agents — DeepSeek Harness (dsh), Claude Code, OpenClaw, Cursor, Dify, Ollama and any Agent Skills host**
 
@@ -165,8 +165,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.8
-grep -q '^version: "1.8.8"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.9
+grep -q '^version: "1.8.9"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS: shasum -a 256 -c checksums.txt
 ```
 
@@ -284,8 +284,8 @@ python3 scripts/cleanup.py --archive-dir ~/.infinity-context/archive --dry-run
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.8
-grep -q '^version: "1.8.8"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.9
+grep -q '^version: "1.8.9"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt          # macOS：shasum -a 256 -c checksums.txt
 ```
 

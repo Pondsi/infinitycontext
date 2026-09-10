@@ -3,6 +3,22 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.8.9 — 2026-09-10
+
+Repository release — new `memory-flush-dedup` hook. **The portable core is unchanged and
+the registry artifact stays at 1.8.7** until it is republished; these files live in
+`openclaw/`, outside the published package.
+
+### Added
+- **`memory-flush-dedup` hook** (`openclaw/memory-flush-dedup/`). Runs on
+  `session:compact:after` and removes byte-identical duplicate `## ` sections that
+  `compaction.memoryFlush` appends again when a flush has already written to the daily
+  memory file but the compaction main step then fails and retries. Matching is conservative
+  (two sections are duplicates only when their non-blank line content is fully identical);
+  before any write it backs the file up to `memory/.bak/` and rotates 14-day-old backups.
+  All errors are log-only (`memory-flush-dedup.log`), so it never blocks or breaks
+  compaction. Provides a CLI (`node handler.js --scan [--dry-run] | --file <path>`).
+
 ## 1.8.8 — 2026-09-10
 
 Repository release — OpenClaw integration hardening. **The portable core is unchanged and the

@@ -1,4 +1,4 @@
----
+﻿---
 name: infinity-context
 description: "Use when a long agent session is about to hit its context limit, when a detail from an earlier turn must be recalled exactly, or when past sessions should stay searchable offline. Compresses context, archives conversation chunks into a local SQLite/FTS5 store with owner-only permissions and a bounded 30-day retention window, and retrieves exact details on demand. Ships explicitly opt-in maintenance tools that change local files: a retention cleanup that permanently deletes expired archive files (verified archive marker + filename allowlist + --confirm-destructive), an ingest-time retention purge with --purge-only, an INFINITY_CONTEXT_NO_ARCHIVE=1 off switch, and an in-place redaction helper that rewrites a file only inside a declared --allow-dir. Works out of the box on DeepSeek Harness (dsh) and OpenClaw; also runs on Claude Code, Cursor, Dify, Ollama and any Agent Skills host."
 license: MIT
@@ -6,7 +6,7 @@ compatibility: "Any host that loads a standard SKILL.md: DeepSeek Harness (dsh),
 allowed-tools: Bash Read Write Env
 metadata:
   author: "Pondsi"
-  version: "1.8.8"
+  version: "1.8.9"
   attribution: "Pondsi - attribution is mandatory for any use, including modified variants"
   license: "MIT"
 ---
@@ -81,8 +81,8 @@ clawhub install infinitycontext --workdir <workspace> --dir skills
 ```bash
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.8
-grep -q '^version: "1.8.8"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
+git checkout --detach v1.8.9
+grep -q '^version: "1.8.9"' SKILL.md || { echo "tag/version mismatch - stop"; exit 1; }
 sha256sum -c checksums.txt                # macOS: shasum -a 256 -c checksums.txt
 # compare the output with the hashes published in the GitHub release notes
 ```

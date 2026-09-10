@@ -1,4 +1,4 @@
-# OpenClaw integration (not part of the published skill package)
+﻿# OpenClaw integration (not part of the published skill package)
 
 This folder is **deliberately outside the published artifact**. The ClawHub/registry
 package contains only the portable Python core (`SKILL.md`, `scripts/`, `references/`).
@@ -23,7 +23,7 @@ Use a pinned revision and verify every digest before copying. Never copy with a 
 # 1. pinned checkout (audited release tag, never the mutable default branch)
 git clone https://github.com/Pondsi/infinitycontext.git
 cd infinitycontext
-git checkout --detach v1.8.8
+git checkout --detach v1.8.9
 
 # 2. the pinned tag must equal the version in SKILL.md frontmatter
 if (-not (Select-String -Path SKILL.md -Pattern '^version: "1\.8\.8"' -Quiet)) {
@@ -59,9 +59,31 @@ Copy-Item scripts\secure_fs.py              $sc
 # 4. regenerate the hook integrity manifest for the copied pipeline.ps1
 & "$sc\update-integrity.ps1" -PipelineScript "$hook\pipeline.ps1" -ManifestPath "$hook\integrity.json"
 
+# 4b. the memory-flush-dedup hook (separate hook, its own directory)
+$dedup = "$env:USERPROFILE\.openclaw\hooks\memory-flush-dedup"
+New-Item -ItemType Directory -Path $dedup -Force | Out-Null
+Copy-Item openclaw\memory-flush-dedup\HOOK.md    $dedup
+Copy-Item openclaw\memory-flush-dedup\handler.js $dedup
+
 # 5. restart the gateway
 openclaw gateway restart
 ```
+
+## Memory-flush dedup hook
+
+After every compaction, `compaction.memoryFlush` may append the same `## ` section to the
+daily memory file more than once (a flush that writes to disk but fails the compaction main
+step is retried wholesale). The `memory-flush-dedup` hook runs on `session:compact:after`
+and removes byte-identical duplicate sections from recent daily memory files.
+
+- Conservative matching: two sections are duplicates only when their non-blank line content
+  is fully identical (blank-line count, trailing whitespace and standalone HTML-comment
+  marker lines are ignored *for comparison only*).
+- Backups: before any write it copies the file to `memory/.bak/<name>.<stamp>.dedup.bak` and
+  removes backups older than 14 days.
+- Fail-open: every error is logged to `memory-flush-dedup.log` and never thrown, so the hook
+  cannot break the compaction flow.
+- CLI for a one-off sweep: `node handler.js --scan [--dry-run] | --file <path>`.
 
 ## No-window scheduling (Windows)
 
@@ -120,6 +142,7 @@ Verify with `Get-ScheduledTask -TaskName OpenClaw-MainSessionMonitor | Select -E
 | Declared auto-recovery | off unless `enableAutoWake` is set; one validated attempt per round; `WAKE_REQUEST` is logged before acting; no hidden retry loop |
 | No unsolicited notifications | over-limit, compaction failure and wake failure are log-only |
 | Bounded archive retention | the engine purges chunks older than `--retention-days` (default 30) on every run; the wrapper passes the flag through, and `INFINITY_CONTEXT_NO_ARCHIVE=1` in the environment stops the archiver before it writes anything |
+| Fail-open dedup | `memory-flush-dedup` backs up before writing, rotates old backups, and logs all errors without throwing |
 
 ## Files
 
@@ -134,6 +157,8 @@ Verify with `Get-ScheduledTask -TaskName OpenClaw-MainSessionMonitor | Select -E
 | `update-integrity.ps1` | regenerates `integrity.json` after a pipeline edit |
 | `integrity.json` | SHA-256 manifest consumed by `handler.js` |
 | `checksums.txt` | install-time digests for every file in this folder |
+| `memory-flush-dedup/HOOK.md` | manifest for the memory-flush-dedup hook |
+| `memory-flush-dedup/handler.js` | dedup handler: removes duplicate `## ` sections after compaction |
 | `scripts/session_to_sqlite.py` | shared Python engine, copied next to the PowerShell wrapper |
 | `scripts/secure_fs.py` | owner-only permission helper imported by the engine |
 
