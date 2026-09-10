@@ -100,6 +100,18 @@ another program, and nothing leaves the machine.
 > `openclaw/`, is **not** part of this package, and carries its own documentation and
 > `openclaw/checksums.txt`.
 
+> **OpenClaw patches** (`openclaw/patches/`). Two optional post-install patches for the
+> `memory-tencentdb` plugin — not part of the portable core.
+>
+> | Patch | Purpose |
+> |---|---|
+> | `l1-model-chain` | Replace hardcoded model in L1/L2/L3 extraction with ordered fallback chain + API filter |
+> | `internal-session-archive` | Auto-archive `done` memory-* sessions; keep `failed` visible |
+>
+> Each patch has its own `SKILL.md`, self-test (`--selftest`), and PowerShell wrapper.
+> Patches modify the **installed plugin** (not the portable core) and require a gateway
+> restart after application.
+
 ## English
 
 ### What is this?

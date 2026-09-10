@@ -3,6 +3,25 @@
 All notable changes to InfinityContext are documented here.
 Format: version — date — summary.
 
+## 1.9.0 — 2026-09-11
+
+Repository release — L1 model chain patch + internal session archive. **Portable core
+unchanged; registry artifact stays at 1.8.7**.
+
+### Added
+- **L1 model chain patch** (`openclaw/patches/l1-model-chain/`). Patches `memory-tencentdb`
+  plugin dist to replace hardcoded model with ordered fallback chain: session-last →
+  agent default → global default → agent fallbacks → global fallbacks. Filters out
+  providers whose API is not in the 8 core built-ins (e.g. native `ollama`) so the
+  clean runtime never picks a broken model. Adds P2 sidecar: captures the session's
+  last-used model at L0 write time and promotes it to chain position #1 at L1 dispatch.
+  Evidence logs at `info` level for post-restart verification.
+- **Internal session archive** (`openclaw/patches/internal-session-archive/`). Archives
+  `done` memory-* sessions and leaves `failed`/`timeout`/`error` visible with their
+  red badge. Anomaly sessions are never touched. Self-test covers 7 combinations
+  (done/running/failed/timeout/error × read/unread) with a critical assertion that
+  anomaly sessions are never archived or cleared.
+
 ## 1.8.9 — 2026-09-10
 
 Repository release — new `memory-flush-dedup` hook. **The portable core is unchanged and
