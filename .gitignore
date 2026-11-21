@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+
+# Temporary files
+*.tmp
+*.bak
+*.bak-*
+
+# Memory and runtime data
+memory/
+backups/
+trajectory-exports/
+
+# Environment
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Build output
+dist/
+target/
